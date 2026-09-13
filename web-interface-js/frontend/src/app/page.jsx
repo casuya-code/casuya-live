@@ -2,10 +2,11 @@
 
 import LiveBetsGrid from "../components/LiveBetsGrid";
 import DiagnosticsLog from "../components/DiagnosticsLog";
+import ExecutionPanel from "../components/ExecutionPanel";
 import useWebSockets from "../hooks/useWebSockets";
 
 export default function Page() {
-  const { connected, lastEvent, matches, diagnostics } = useWebSockets();
+  const { connected, lastEvent, matches, diagnostics, pnl } = useWebSockets();
 
   const marketCount = matches.reduce(
     (acc, m) => acc + Object.keys(m.markets || {}).length,
@@ -54,6 +55,7 @@ export default function Page() {
         </section>
 
         <LiveBetsGrid matches={matches} lastEvent={lastEvent} />
+        <ExecutionPanel pnl={pnl} />
         <DiagnosticsLog entries={diagnostics} />
 
         <footer className="page-foot">

@@ -10,9 +10,12 @@ const REDIS_URL = process.env.REDIS_URL;
 // sides, quotes). It is internal-only and must never be relayed to public
 // dashboard clients. Override WS_EXTRA_CHANNELS explicitly if a private
 // operator view ever needs it.
+// execution:pnl is a derived, operator-facing aggregate (graded results and
+// session totals) and is safe to display on the dashboard.
 const WS_CHANNELS = [
   process.env.WS_MATCHES_CHANNEL || "matches:live",
   process.env.WS_DIAG_CHANNEL || "diagnostics:events",
+  process.env.WS_PNL_CHANNEL || "execution:pnl",
   ...(process.env.WS_EXTRA_CHANNELS
     ? process.env.WS_EXTRA_CHANNELS.split(",").map((c) => c.trim()).filter(Boolean)
     : []),

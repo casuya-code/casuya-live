@@ -18,12 +18,15 @@ import (
 
 // Config is the full broker bootstrap contract.
 type Config struct {
-	RedisURL     string
-	Channel      string
-	BookmakerWS  string
-	BookmakerKey string
-	AuthSecret   string
-	MinLatencyMS int
+	RedisURL       string
+	Channel        string
+	BookmakerWS    string
+	BookmakerKey   string
+	AuthSecret     string
+	MinLatencyMS   int
+	SettleChannel  string
+	PnlChannel     string
+	PnlHash        string
 }
 
 // Broker owns both sides of the trade lifecycle.
@@ -32,6 +35,11 @@ type Broker struct {
 	rdb    *redis.Client
 	dialer *websocket.Dialer
 	once   sync.Once
+
+	mu        sync.Mutex
+	positions map[string]Fill
+	orderSeq  []string
+	session   SessionTotals
 }
 
 // New connects to the internal Redis instance without blocking the caller.
@@ -45,10 +53,20 @@ func New(cfg Config) (*Broker, error) {
 		_ = rdb.Close()
 		return nil, fmt.Errorf("redis ping: %w", err)
 	}
+	if cfg.SettleChannel == "" {
+		cfg.SettleChannel = "bookmaker:settlements"
+	}
+	if cfg.PnlChannel == "" {
+		cfg.PnlChannel = "execution:pnl"
+	}
+	if cfg.PnlHash == "" {
+		cfg.PnlHash = "pnl:session"
+	}
 	return &Broker{
-		cfg:    cfg,
-		rdb:    rdb,
-		dialer: &websocket.Dialer{HandshakeTimeout: 10 * time.Second},
+		cfg:       cfg,
+		rdb:       rdb,
+		dialer:    &websocket.Dialer{HandshakeTimeout: 10 * time.Second},
+		positions: make(map[string]Fill),
 	}, nil
 }
 
@@ -61,6 +79,7 @@ func (b *Broker) Run(ctx context.Context) error {
 	// bookmaker round-trip is in flight.
 	ch := pubsub.Channel(redis.WithChannelSize(256))
 	log.Printf("listening on channel %s", b.cfg.Channel)
+	go b.settleLoop(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,10 +109,124 @@ func (b *Broker) dispatch(ctx context.Context, payload *executionPayload) error 
 	if err := b.authHandshake(ctx, conn); err != nil {
 		return fmt.Errorf("auth handshake: %w", err)
 	}
-	if err := b.placeOrder(ctx, conn, payload); err != nil {
+	fill, err := b.placeOrder(ctx, conn, payload)
+	if err != nil {
 		return fmt.Errorf("order placement: %w", err)
 	}
+	b.recordFill(fill)
 	return nil
+}
+
+// recordFill stores a confirmed order so it can be graded at settlement.
+func (b *Broker) recordFill(f *Fill) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, exists := b.positions[f.OrderID]; exists {
+		return
+	}
+	if len(b.orderSeq) >= 500 {
+		oldest := b.orderSeq[0]
+		b.orderSeq = b.orderSeq[1:]
+		delete(b.positions, oldest)
+	}
+	b.positions[f.OrderID] = *f
+	b.orderSeq = append(b.orderSeq, f.OrderID)
+}
+
+// settleLoop grades bookmaker settlements from the results bus and publishes
+// PnL snapshots for the operator dashboard and the pnl:session hash.
+func (b *Broker) settleLoop(ctx context.Context) {
+	pubsub := b.rdb.Subscribe(ctx, b.cfg.SettleChannel)
+	defer pubsub.Close()
+	ch := pubsub.Channel(redis.WithChannelSize(64))
+	log.Printf("listening on settlement channel %s", b.cfg.SettleChannel)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			var s Settlement
+			if err := json.Unmarshal([]byte(msg.Payload), &s); err != nil {
+				log.Printf("bad settlement frame: %v", err)
+				continue
+			}
+			snapshot := b.grade(&s)
+			body, _ := json.Marshal(snapshot)
+			if err := b.rdb.Publish(ctx, b.cfg.PnlChannel, body).Err(); err != nil {
+				log.Printf("pnl publish failed: %v", err)
+			}
+			b.persistSession(ctx, snapshot)
+			b.forget(snapshot.Settled)
+			log.Printf("settled %d order(s) for %s: net %+.2f (won %d / lost %d)",
+				len(snapshot.Settled), s.MatchID, snapshot.Session.Net, snapshot.Session.Won, snapshot.Session.Lost)
+		}
+	}
+}
+
+// grade applies settlement to the broker's session totals.
+func (b *Broker) grade(s *Settlement) *PnlSnapshot {
+	settled := settleOrders(s.Orders, s.FinalScore.Home, s.FinalScore.Away)
+	var net float64
+	for _, so := range settled {
+		net += so.Pnl
+	}
+
+	b.mu.Lock()
+	b.session.Net += net
+	for _, so := range settled {
+		switch so.Result {
+		case "won":
+			b.session.Won++
+		case "lost":
+			b.session.Lost++
+		}
+	}
+	snap := &PnlSnapshot{
+		Type:       "pnl",
+		Cycle:      s.Cycle,
+		MatchID:    s.MatchID,
+		FinalScore: s.FinalScore,
+		Settled:    settled,
+		Session:    b.session,
+	}
+	b.mu.Unlock()
+	return snap
+}
+
+// forget drops settled order ids so the position store stays bounded.
+func (b *Broker) forget(settled []SettledOrder) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, so := range settled {
+		if _, ok := b.positions[so.OrderID]; ok {
+			delete(b.positions, so.OrderID)
+			for i, id := range b.orderSeq {
+				if id == so.OrderID {
+					b.orderSeq = append(b.orderSeq[:i], b.orderSeq[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+}
+
+// persistSession backs the running totals into a Redis hash so a restart or a
+// second operator view can read the accumulated bankroll.
+func (b *Broker) persistSession(ctx context.Context, s *PnlSnapshot) {
+	if len(s.Settled) == 0 {
+		return
+	}
+	pipe := b.rdb.TxPipeline()
+	pipe.HIncrByFloat(ctx, b.cfg.PnlHash, "net", s.Session.Net)
+	pipe.HIncrBy(ctx, b.cfg.PnlHash, "won", int64(s.Session.Won))
+	pipe.HIncrBy(ctx, b.cfg.PnlHash, "lost", int64(s.Session.Lost))
+	pipe.HSet(ctx, b.cfg.PnlHash, "updated_cycle", s.Cycle)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("pnl hash update failed: %v", err)
+	}
 }
 
 func (b *Broker) authHandshake(ctx context.Context, conn *websocket.Conn) error {
@@ -129,7 +262,7 @@ func (b *Broker) authHandshake(ctx context.Context, conn *websocket.Conn) error 
 	return nil
 }
 
-func (b *Broker) placeOrder(ctx context.Context, conn *websocket.Conn, p *executionPayload) error {
+func (b *Broker) placeOrder(ctx context.Context, conn *websocket.Conn, p *executionPayload) (*Fill, error) {
 	order := map[string]any{
 		"type":      "place_order",
 		"market":    p.MarketID,
@@ -142,7 +275,7 @@ func (b *Broker) placeOrder(ctx context.Context, conn *websocket.Conn, p *execut
 	sig := sign(body, b.cfg.AuthSecret)
 	envelope := map[string]any{"body": base64.StdEncoding.EncodeToString(body), "sig": sig}
 	if err := conn.WriteJSON(envelope); err != nil {
-		return err
+		return nil, err
 	}
 	// Bound the fill wait by the configured latency budget (default 500ms).
 	latency := b.cfg.MinLatencyMS
@@ -153,16 +286,33 @@ func (b *Broker) placeOrder(ctx context.Context, conn *websocket.Conn, p *execut
 	_ = conn.SetReadDeadline(deadline)
 	_, resp, err := conn.ReadMessage()
 	if err != nil {
-		return fmt.Errorf("response read: %w", err)
+		return nil, fmt.Errorf("response read: %w", err)
 	}
-	var result map[string]any
+	var result struct {
+		Status  string  `json:"status"`
+		OrderID string  `json:"order_id"`
+		Markup  string  `json:"market"`
+		Side    string  `json:"side"`
+		Odds    float64 `json:"odds"`
+		Stake   float64 `json:"stake"`
+	}
 	if err := json.Unmarshal(resp, &result); err != nil {
-		return fmt.Errorf("response unmarshal: %w", err)
+		return nil, fmt.Errorf("response unmarshal: %w", err)
 	}
-	if result["status"] != "filled" {
-		return fmt.Errorf("order not filled: %v", result)
+	if result.Status != "filled" {
+		return nil, fmt.Errorf("order not filled: %v", result)
 	}
-	return nil
+	if result.OrderID == "" {
+		result.OrderID = fmt.Sprintf("L%d", time.Now().UnixNano())
+	}
+	return &Fill{
+		OrderID: result.OrderID,
+		Market:  p.MarketID,
+		Side:    p.Side,
+		Odds:    p.Odds,
+		Stake:   p.Amount,
+		FillAt:  time.Now(),
+	}, nil
 }
 
 // Close terminates the Redis connection and any background activity.

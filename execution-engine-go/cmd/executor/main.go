@@ -19,12 +19,15 @@ func main() {
 	defer stop()
 
 	cfg := broker.Config{
-		RedisURL:    mustEnv("REDIS_URL"),
-		Channel:     envOr("EXECUTION_IN_CHANNEL", "execution:commands"),
-		BookmakerWS: mustEnv("BOOKMAKER_WS_URL"),
-		BookmakerKey: mustEnv("BOOKMAKER_API_KEY"),
-		AuthSecret:   mustEnv("INTERNAL_AUTH_SECRET"),
-		MinLatencyMS: 50,
+		RedisURL:      mustEnv("REDIS_URL"),
+		Channel:       envOr("EXECUTION_IN_CHANNEL", "execution:commands"),
+		BookmakerWS:   mustEnv("BOOKMAKER_WS_URL"),
+		BookmakerKey:  mustEnv("BOOKMAKER_API_KEY"),
+		AuthSecret:    mustEnv("INTERNAL_AUTH_SECRET"),
+		MinLatencyMS:  50,
+		SettleChannel: envOr("SETTLE_IN_CHANNEL", "bookmaker:settlements"),
+		PnlChannel:    envOr("PNL_OUT_CHANNEL", "execution:pnl"),
+		PnlHash:       envOr("PNL_HASH", "pnl:session"),
 	}
 
 	b, err := broker.New(cfg)

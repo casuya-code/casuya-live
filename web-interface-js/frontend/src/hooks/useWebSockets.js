@@ -35,6 +35,7 @@ export default function useWebSockets() {
   const [lastEvent, setLastEvent] = useState(null);
   const [matches, setMatches] = useState([]);
   const [diagnostics, setDiagnostics] = useState([]);
+  const [pnl, setPnl] = useState(null);
 
   const socketRef = useRef(null);
   const retryRef = useRef(0);
@@ -73,6 +74,11 @@ export default function useWebSockets() {
             frame.data.match_id
           ) {
             setDiagnostics((prev) => [frame.data, ...prev].slice(0, 60));
+          } else if (frame.type === "execution:pnl" && frame.data) {
+            setPnl((prev) => ({
+              last: frame.data,
+              history: [frame.data, ...(prev?.history || [])].slice(0, 40),
+            }));
           }
           // Other channel types (e.g. execution acks) are intentionally
           // ignored: they carry no dashboard state.
@@ -104,5 +110,5 @@ export default function useWebSockets() {
     };
   }, []);
 
-  return { connected, lastEvent, matches, diagnostics };
+  return { connected, lastEvent, matches, diagnostics, pnl };
 }

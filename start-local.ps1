@@ -79,7 +79,7 @@ $svc += Start-Svc -Name "analytics" -File (Join-Path $root "analytics-engine-py\
 
 $svc += Start-Svc -Name "mock" -File "node" -ArgsList @((Join-Path $root "mock-vendor\server.js")) `
     -WorkDir (Join-Path $root "mock-vendor") `
-    -Env @{ "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "MOCK_VENDOR_PORT" = "19999"; "MOCK_TRADE_PORT" = "19998" }
+    -Env @{ "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "MOCK_VENDOR_PORT" = "19999"; "MOCK_TRADE_PORT" = "19998"; "REDIS_URL" = "redis://localhost:6379/0" }
 
 $svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") `
     -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_WS_URL" = "ws://localhost:19999/vendor" }

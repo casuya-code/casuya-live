@@ -11,6 +11,77 @@ const AUTH_SECRET = process.env.INTERNAL_AUTH_SECRET || "local-dev-secret";
 const VENDOR_PORT = parseInt(process.env.MOCK_VENDOR_PORT || "19999", 10);
 const TRADE_PORT = parseInt(process.env.MOCK_TRADE_PORT || "19998", 10);
 
+const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379/0";
+const SETTLE_CHANNEL = process.env.SETTLE_CHANNEL || "bookmaker:settlements";
+
+// --- settlement book -------------------------------------------------------
+// Fills survive per-order connections (the executor dials once per order), so
+// the book is server-global and keyed by order_id. Demos run a repeating
+// ~40s cycle; the FULLTIME frame of every cycle publishes that cycle's fills
+// for grading by the execution engine.
+const CYCLE_MS = 40000;
+const BOOT_EPOCH = Math.floor(Date.now() / 1000) - 31 * 60;
+const cycleAt = (t) => 1 + Math.floor((Date.now() - BOOT_EPOCH * 1000) / CYCLE_MS);
+
+const book = new Map();
+let orderSeq = 0;
+
+function redisPublisher() {
+  let client = null;
+  try {
+    const redis = require(path.join(
+      __dirname, "..", "web-interface-js", "backend", "node_modules", "redis"
+    ));
+    client = redis.createClient({ url: REDIS_URL });
+    client.on("error", () => {});
+    client.connect().then(
+      () => console.log("[mock-vendor] redis connected (settlement bus)"),
+      (err) => {
+        console.log(`[mock-vendor] settlement bus offline (${err.message})`);
+        client = null;
+      }
+    );
+  } catch {
+    console.log("[mock-vendor] redis module missing; settlement bus offline");
+  }
+  return client;
+}
+
+const redisClient = redisPublisher();
+
+function publishSettlement(numberOfCycle, finalScore) {
+  const orders = [];
+  for (const [, o] of book) {
+    if (o.cycle === numberOfCycle) orders.push(o);
+  }
+  const frame = {
+    type: "settlement",
+    cycle: numberOfCycle,
+    match_id: "epl-2026-0042",
+    final_score: finalScore,
+    orders: orders.map((o) => ({
+      order_id: o.order_id,
+      market: o.market,
+      side: o.side,
+      odds: fmt(o.odds),
+      stake: fmt(o.stake),
+    })),
+  };
+  if (orders.length === 0) {
+    console.log(`[mock-vendor] settle cycle ${numberOfCycle}: no orders`);
+    return;
+  }
+const body = JSON.stringify(frame);
+  if (redisClient && redisClient.isReady) {
+    redisClient.publish(SETTLE_CHANNEL, body);
+    console.log(`[mock-vendor] -> settlement cycle ${numberOfCycle} (${orders.length} orders)`);
+  } else {
+    console.log(`[mock-vendor] settlement (no redis): ${body}`);
+  }
+  for (const o of orders) book.delete(o.order_id);
+}
+}
+
 function sign(body, secret) {
   return crypto.createHmac("sha256", secret).update(body).digest("base64url");
 }
@@ -87,8 +158,14 @@ function vendorServer() {
         return;
       }
       const step = SCHEDULE[guard];
-      socket.send(JSON.stringify(frame({ ...step, kickoff })));
-      console.log(`[mock-vendor] -> ${step.clock} ${step.score[0]}-${step.score[1]}`);
+      const streamed = frame({ ...step, kickoff });
+      socket.send(JSON.stringify(streamed));
+      const minute = step.clock;
+      const display = step.clock.length > 2 ? step.clock : `${step.clock}'`;
+      console.log(`[mock-vendor] -> ${display} ${step.score[0]}-${step.score[1]}`);
+      if (step.clock === "FULLTIME") {
+        publishSettlement(cycleAt(Date.now()), { home: step.score[0], away: step.score[1] });
+      }
       guard += 1;
     }, 2500);
     socket.on("close", () => clearInterval(timer));
@@ -150,15 +227,26 @@ function tradeServer() {
         console.log(
           `[mock-vendor] ORDER ${order.type} ${order.market} ${order.side} @${order.odds} stake ${order.stake}`
         );
+        const order_id = `M${++orderSeq}`;
+        book.set(order_id, {
+          order_id,
+          market: order.market,
+          side: order.side,
+          odds: order.odds,
+          stake: order.stake,
+          cycle: cycleAt(Date.now()),
+          fill_ts: Date.now(),
+        });
         socket.send(JSON.stringify({
           status: "filled",
+          order_id,
           market: order.market,
           side: order.side,
           odds: order.odds,
           stake: order.stake,
           fill_ts: Date.now(),
         }));
-        console.log("[mock-vendor] ORDER FILLED");
+        console.log(`[mock-vendor] ORDER FILLED -> ${order_id}`);
         return;
       }
       socket.send(JSON.stringify({ status: "error", body: "unknown frame" }));
