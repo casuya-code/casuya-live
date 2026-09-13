@@ -23,3 +23,6 @@ Thumbs.db
 
 # go
 *.test
+
+# local tooling
+.tools/

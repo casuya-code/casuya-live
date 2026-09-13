@@ -126,7 +126,7 @@ func (m Match) Validate() error {
 	if len(m.Markets) == 0 {
 		return ErrBadMarket
 	}
-	for id, market := range m.Markets {
+	for _, market := range m.Markets {
 		if err := market.Validate(); err != nil {
 			return err
 		}
