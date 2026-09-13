@@ -1,0 +1,6 @@
+# Runtime imports are redis (broker pub/sub) and requests (execution
+# dispatch). Scientific packages (numpy/pandas/scipy) and pydantic/PyYAML
+# are intentionally absent: the online engine runs calibrated shims, not
+# training. Add them back only when the service imports them.
+redis==5.0.8
+requests==2.32.3

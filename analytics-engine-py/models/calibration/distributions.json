@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "generated_at": "offline-calibration",
+  "leagues": {
+    "default": {
+      "danger_per_minute": 2.5,
+      "possession_home": 0.5,
+      "shot_accuracy": 0.33
+    },
+    "england_premier_league": {
+      "danger_per_minute": 2.8,
+      "possession_home": 0.51,
+      "shot_accuracy": 0.34
+    },
+    "spain_la_liga": {
+      "danger_per_minute": 2.9,
+      "possession_home": 0.50,
+      "shot_accuracy": 0.33
+    }
+  }
+}

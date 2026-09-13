@@ -1,0 +1,22 @@
+{
+  "match_id": "epl-2026-0042",
+  "sport": "football",
+  "league": "england_premier_league",
+  "home_team": "Example FC",
+  "away_team": "Casual United",
+  "kickoff": 1786600000,
+  "clock": "31",
+  "score_home": 0,
+  "score_away": 1,
+  "shots": 9,
+  "shots_on_target": 4,
+  "dangerous_attacks": 27,
+  "possession_home": 0.58,
+  "markets": {
+    "2H_1X2": {
+      "market_id": "2H_1X2",
+      "odds": { "home": 2.10, "draw": 3.40, "away": 5.25 },
+      "updated_at": 1786600700
+    }
+  }
+}

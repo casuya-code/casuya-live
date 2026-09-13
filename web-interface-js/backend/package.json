@@ -1,0 +1,17 @@
+{
+  "name": "casuya-live-web-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebSocket relay bridging Redis pub/sub channels to the CASUYA-LIVE dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "redis": "^4.7.0",
+    "ws": "^8.18.0"
+  }
+}

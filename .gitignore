@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# build output
+.next/
+out/
+dist/
+bin/
+
+# env & secrets
+.env
+.env.local
+
+# logs
+*.log
+
+# os
+.DS_Store
+Thumbs.db
+
+# go
+*.test
