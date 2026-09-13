@@ -77,11 +77,15 @@ $svc += Start-Svc -Name "analytics" -File (Join-Path $root "analytics-engine-py\
     -ArgsList @("src\main.py") -WorkDir (Join-Path $root "analytics-engine-py") `
     -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "EXECUTION_SERVICE_URL" = "http://localhost:8081" }
 
+$svc += Start-Svc -Name "mock" -File "node" -ArgsList @((Join-Path $root "mock-vendor\server.js")) `
+    -WorkDir (Join-Path $root "mock-vendor") `
+    -Env @{ "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "MOCK_VENDOR_PORT" = "19999"; "MOCK_TRADE_PORT" = "19998" }
+
 $svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") `
-    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_WS_URL" = "wss://localhost:19999/vendor" }
+    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_WS_URL" = "ws://localhost:19999/vendor" }
 
 $svc += Start-Svc -Name "executor" -File (Join-Path $bin "executor.exe") -WorkDir (Join-Path $root "execution-engine-go") `
-    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "BOOKMAKER_WS_URL" = "wss://localhost:19998/trade"; "BOOKMAKER_API_KEY" = "local-test-key"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "PORT" = "8081" }
+    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "BOOKMAKER_WS_URL" = "ws://localhost:19998/trade"; "BOOKMAKER_API_KEY" = "local-test-key"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "PORT" = "8081" }
 
 $svc += Start-Svc -Name "frontend" -File "npm.cmd" -ArgsList @("run","dev") `
     -WorkDir (Join-Path $root "web-interface-js\frontend") `

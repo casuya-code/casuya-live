@@ -60,16 +60,20 @@ func (r *Redis) PublishMatch(ctx context.Context, match stream.Match) error {
 	}
 	key := hashKeyPrefix + match.MatchID
 	fields := map[string]any{
-		"sport":         match.Sport,
-		"league":        match.League,
-		"home_team":     match.HomeTeam,
-		"away_team":     match.AwayTeam,
-		"kickoff":       match.Kickoff.Unix(),
-		"clock":         match.Clock,
-		"score_home":    match.Score.Home,
-		"score_away":    match.Score.Away,
-		"received_at":   match.ReceivedAt.UnixMilli(),
-		"markets_total": len(match.Markets),
+		"sport":             match.Sport,
+		"league":            match.League,
+		"home_team":         match.HomeTeam,
+		"away_team":         match.AwayTeam,
+		"kickoff":           match.Kickoff.Unix(),
+		"clock":             match.Clock,
+		"score_home":        match.Score.Home,
+		"score_away":        match.Score.Away,
+		"shots":             match.Shots,
+		"shots_on_target":   match.ShotsOnTarget,
+		"dangerous_attacks": match.DangerousAttacks,
+		"possession_home":   match.PossessionHome,
+		"received_at":       match.ReceivedAt.UnixMilli(),
+		"markets_total":     len(match.Markets),
 	}
 	for id, market := range match.Markets {
 		fields["odds_"+id+"_home"] = strconv.FormatFloat(market.Odds.Home, 'f', 2, 64)

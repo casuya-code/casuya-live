@@ -38,16 +38,22 @@ type MarketFrame struct {
 
 // Match is the validated, storage-ready contract derived from a vendor frame.
 type Match struct {
-	MatchID    string            `json:"match_id"`
-	Sport      string            `json:"sport"`
-	League     string            `json:"league"`
-	HomeTeam   string            `json:"home_team"`
-	AwayTeam   string            `json:"away_team"`
-	Kickoff    time.Time         `json:"kickoff"`
-	Clock      string            `json:"clock"`
-	Score      Score             `json:"score"`
-	Markets    map[string]Market `json:"markets"`
-	ReceivedAt time.Time         `json:"received_at"`
+	MatchID  string            `json:"match_id"`
+	Sport    string            `json:"sport"`
+	League   string            `json:"league"`
+	HomeTeam string            `json:"home_team"`
+	AwayTeam string            `json:"away_team"`
+	Kickoff  time.Time         `json:"kickoff"`
+	Clock    string            `json:"clock"`
+	Score    Score             `json:"score"`
+	Markets  map[string]Market `json:"markets"`
+	// Momentum statistics the analytics engine folds into its feature vector.
+	// Vendors that omit them fall back to zeroes downstream.
+	Shots            int       `json:"shots"`
+	ShotsOnTarget    int       `json:"shots_on_target"`
+	DangerousAttacks int       `json:"dangerous_attacks"`
+	PossessionHome   float64   `json:"possession_home"`
+	ReceivedAt       time.Time `json:"received_at"`
 }
 
 // Score tracks current match state.
@@ -74,29 +80,37 @@ func DefaultScope() MarketScope {
 
 // matchFrame is the raw inbound JSON envelope before boundary validation.
 type matchFrame struct {
-	MatchID  string            `json:"match_id"`
-	Sport    string            `json:"sport"`
-	League   string            `json:"league"`
-	HomeTeam string            `json:"home_team"`
-	AwayTeam string            `json:"away_team"`
-	Kickoff  int64             `json:"kickoff"`
-	Clock    string            `json:"clock"`
-	Score    Score             `json:"score"`
-	Markets  map[string]Market `json:"markets"`
+	MatchID          string            `json:"match_id"`
+	Sport            string            `json:"sport"`
+	League           string            `json:"league"`
+	HomeTeam         string            `json:"home_team"`
+	AwayTeam         string            `json:"away_team"`
+	Kickoff          int64             `json:"kickoff"`
+	Clock            string            `json:"clock"`
+	Score            Score             `json:"score"`
+	Markets          map[string]Market `json:"markets"`
+	Shots            int               `json:"shots"`
+	ShotsOnTarget    int               `json:"shots_on_target"`
+	DangerousAttacks int               `json:"dangerous_attacks"`
+	PossessionHome   float64           `json:"possession_home"`
 }
 
 func (f matchFrame) toMatch() Match {
 	return Match{
-		MatchID:    f.MatchID,
-		Sport:      f.Sport,
-		League:     f.League,
-		HomeTeam:   f.HomeTeam,
-		AwayTeam:   f.AwayTeam,
-		Kickoff:    time.Unix(f.Kickoff, 0),
-		Clock:      f.Clock,
-		Score:      f.Score,
-		Markets:    f.Markets,
-		ReceivedAt: time.Now().UTC(),
+		MatchID:          f.MatchID,
+		Sport:            f.Sport,
+		League:           f.League,
+		HomeTeam:         f.HomeTeam,
+		AwayTeam:         f.AwayTeam,
+		Kickoff:          time.Unix(f.Kickoff, 0),
+		Clock:            f.Clock,
+		Score:            f.Score,
+		Markets:          f.Markets,
+		Shots:            f.Shots,
+		ShotsOnTarget:    f.ShotsOnTarget,
+		DangerousAttacks: f.DangerousAttacks,
+		PossessionHome:   f.PossessionHome,
+		ReceivedAt:       time.Now().UTC(),
 	}
 }
 
