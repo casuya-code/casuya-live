@@ -1,3 +1,18 @@
+import { Inter, JetBrains_Mono } from "next/font/google";
+import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
+
+const jetbrains = JetBrains_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-mono",
+});
+
 export const metadata = {
   title: "CASUYA-LIVE — Operational Dashboard",
   description:
@@ -7,15 +22,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          backgroundColor: "#0b0f17",
-          color: "#e6edf3",
-          fontFamily:
-            "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        }}
-      >
+      <body className={`${inter.variable} ${jetbrains.variable}`}>
         {children}
       </body>
     </html>
