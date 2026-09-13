@@ -121,6 +121,19 @@ assert res.get("status") == "filled", res
 assert seen.get("token") == KEY, "X-Internal-Token header missing"
 print("dispatch auth header: OK")
 
+# --- position gate: one fill per (match, market) until FULLTIME ---
+from position_gate import PositionGate
+
+gate = PositionGate()
+assert gate.try_acquire("m1", "2H_1X2", "away") is True
+assert gate.try_acquire("m1", "2H_1X2", "home") is False, "same market re-acquired"
+assert gate.try_acquire("m1", "1H_1X2", "draw") is True, "distinct market blocked"
+assert len(gate) == 2
+gate.release("m1")
+assert len(gate) == 0, "FULLTIME did not release positions"
+assert gate.try_acquire("m1", "2H_1X2", "away") is True, "cycle re-open blocked"
+print("position gate: OK")
+
 # --- diagnostics: WON silent, LOST emits, predicted_side preferred ---
 from diagnostics import DiagnosticsEngine
 

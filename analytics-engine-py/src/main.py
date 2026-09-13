@@ -16,6 +16,7 @@ import redis.asyncio as redis
 from feature_study import FeatureStudy
 from filter_engine import FilterEngine
 from diagnostics import DiagnosticsEngine, DIAG_CHANNEL
+from position_gate import PositionGate
 
 LOG = logging.getLogger("casuya.analytics")
 
@@ -35,6 +36,8 @@ class AnalyticsBroker:
             base_url=os.getenv("EXECUTION_SERVICE_URL", "http://execution-engine:8080"),
         )
         self.diagnostics = DiagnosticsEngine()
+        self.gate = PositionGate()
+        self.gate_lock = asyncio.Lock()
         self.frames: asyncio.Queue = asyncio.Queue(maxsize=4096)
         self.dropped = 0
 
@@ -88,19 +91,41 @@ class AnalyticsBroker:
                                     dataclasses.asdict(record), sort_keys=True
                                 ),
                             )
+                    # A FULLTIME frame closes the match's cycle: any exposed
+                    # market is settled, so the next cycle may trade it again.
+                    if str(frame.get("clock", "")).upper() == "FULLTIME":
+                        match_id = frame.get("match_id")
+                        if match_id:
+                            async with self.gate_lock:
+                                self.gate.release(match_id)
                     snapshots = self.study.observe_many(frame)
                     for snapshot in snapshots:
                         snapshot.features = self.study.feature_vector(snapshot)
                         verdict = self.filter.evaluate(snapshot)
                         if verdict.should_execute:
+                            # One live position per market: hold the trigger
+                            # while the same market is already exposed.
+                            async with self.gate_lock:
+                                acquired = self.gate.try_acquire(
+                                    snapshot.match_id, verdict.market_id, verdict.side
+                                )
+                            if not acquired:
+                                LOG.info(
+                                    "[worker %d] gated %s/%s: position already open",
+                                    worker_id,
+                                    snapshot.match_id,
+                                    verdict.market_id,
+                                )
+                                continue
                             await r.publish(
                                 CHANNEL_OUT,
                                 verdict.to_signed_payload(self.filter.signer_key),
                             )
                             LOG.info(
-                                "[worker %d] execution payload emitted for %s",
+                                "[worker %d] execution payload emitted for %s (%s)",
                                 worker_id,
                                 snapshot.match_id,
+                                verdict.market_id,
                             )
                 except Exception as exc:  # never kill the listener loop
                     LOG.exception("[worker %d] frame error: %s", worker_id, exc)
