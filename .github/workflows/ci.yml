@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: go services
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [data-ingestion-go, execution-engine-go]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.service }}/go.mod
+          cache-dependency-path: ${{ matrix.service }}/go.sum
+      - run: go build ./...
+      - run: go test ./...
+
+  python:
+    name: analytics engine
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: analytics-engine-py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python tests/smoke_test.py
+
+  frontend:
+    name: web interface
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-interface-js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            web-interface-js/backend/package-lock.json
+            web-interface-js/frontend/package-lock.json
+      - run: node --check backend/server.js
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: NEXT_PUBLIC_WS_BACKEND_URL=ws://localhost:8080/ws npm run build --prefix frontend
