@@ -80,6 +80,24 @@ Each service also runs on its own. The Go services require a running Redis
 (`REDIS_URL`); the analytics engine additionally needs the calibration assets in
 `analytics-engine-py/models/calibration`.
 
+### Calibration
+
+The win-probability weights are fitted offline from the durable frame history
+(`matches:live` stream entries carry the full frame under `data`):
+
+```powershell
+python analytics-engine-py/scripts/calibrate.py --frames 2000 --update-distributions
+```
+
+It regroups frames into complete match cycles, builds home/away training rows
+labeling by the final score, and fits a pure-stdlib logistic regression over the
+exact `FilterEngine.score_inputs` vector the live filter consumes. A
+signal-less fit (draw-heavy history, too few rows) is rejected outright, so
+`models/calibration/weights.json` only appears when the data supports it —
+until then the offline shim weights stay in force. `--update-distributions`
+recomputes the per-league `distributions.json` baselines (danger, possession,
+shot accuracy) from the observed frames.
+
 ## Testing
 
 ```powershell

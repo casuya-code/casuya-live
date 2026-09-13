@@ -96,7 +96,12 @@ func (r *Redis) PublishMatch(ctx context.Context, match stream.Match) error {
 	pipe.Expire(ctx, key, 24*time.Hour)
 	pipe.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey,
-		Values: map[string]any{"match_id": match.MatchID, "ts": match.ReceivedAt.UnixMilli()},
+		Values: map[string]any{
+			"match_id": match.MatchID,
+			"ts":       match.ReceivedAt.UnixMilli(),
+			// Full frame persists for offline calibration (scripts/calibrate.py).
+			"data": string(frame),
+		},
 	})
 	// Wake analytics-engine-py, which SUBSCRIBEs to this channel. XADD alone
 	// does not deliver to Pub/Sub subscribers.

@@ -19,6 +19,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -27,6 +28,20 @@ LOG = logging.getLogger("casuya.filter")
 
 MIN_ODDS = float(os.getenv("MIN_TRIGGER_ODDS", "5.0"))
 MARGIN_SLACK = float(os.getenv("TRUE_PROB_MARGIN_SLACK", "0.020"))  # 2pp safety
+
+# Column order shared by the live score and offline calibration weights.
+FEATURE_COLS = [
+    "divergence",
+    "danger_intensity",
+    "possession_gap",
+    "shot_accuracy_gap",
+    "behind_target",
+]
+
+# Offline shim: hand-picked priors used until calibrate.py fits real weights.
+SHIM_WEIGHTS = [0.35, 0.30, 0.20, 0.15, 1.20]
+
+_CALIB_PATH = Path(__file__).resolve().parents[1] / "models" / "calibration" / "weights.json"
 
 
 @dataclass
@@ -132,36 +147,74 @@ class FilterEngine:
         )
 
     @staticmethod
-    def true_probability(snapshot: Any, side: str) -> float:
+    def _calibrated() -> dict[str, Any] | None:
+        """Load the fitted weights once; None keeps the shim in force."""
+        if not hasattr(FilterEngine, "_calib"):
+            calib = None
+            try:
+                with open(_CALIB_PATH, encoding="utf-8") as fh:
+                    loaded = json.load(fh)
+                if isinstance(loaded.get("weights"), list) and len(loaded["weights"]) == len(FEATURE_COLS):
+                    calib = loaded
+            except (OSError, json.JSONDecodeError):
+                calib = None
+            FilterEngine._calib = calib
+        return FilterEngine._calib
+
+    @staticmethod
+    def score_inputs(snapshot: Any, side: str) -> list[float]:
+        """Normalised x-vector (FEATURE_COLS order) for the logistic score.
+
+        Features are home-centric, so the away perspective inverts the gaps.
+        This is the exact input surface both the live score and calibrate.py
+        fit against, so fitted weights hold at runtime.
+        """
+        features = getattr(snapshot, "features", {}) or {}
+        invert = side == "away"
+        behind = float(features.get("home_behind", 0.0))
+        if not invert:
+            behind_target = behind
+        elif features.get("score_pressure", 0.0) > 0 and not behind:
+            behind_target = 1.0  # away is the side behind (home leads)
+        else:
+            behind_target = 0.0
+        gap = features.get("possession_gap", 0.0)
+        poss_gap = -gap if invert else gap
+        acc = features.get("shot_accuracy_gap", 0.0)
+        shot_gap = -acc if invert else acc
+        div = features.get("divergence", 0.0)
+        divergence = -div if invert else div
+        return [
+            divergence,
+            features.get("danger_intensity", 1.0),
+            poss_gap,
+            shot_gap,
+            behind_target,
+        ]
+
+    @classmethod
+    def true_probability(cls, snapshot: Any, side: str) -> float:
         """Calibrated posterior derived from momentum divergence.
 
-        A weighted logistic score over the Study Room features. Weights live in
-        the calibration matrix; this calibrated shim is replaced post-training.
-        Features are home-centric, so the away perspective inverts the gaps.
+        If calibrate.py has written weights.json, the weight vector + bias
+        replace the offline shim (SHIM_WEIGHTS, no bias). Draw probability is
+        derived from the two opposing legs to keep the market closed.
         """
         features = getattr(snapshot, "features", {}) or {}
         if side == "draw":
-            away_p = FilterEngine.true_probability(snapshot, "away")
-            home_p = FilterEngine.true_probability(snapshot, "home")
+            away_p = cls.true_probability(snapshot, "away")
+            home_p = cls.true_probability(snapshot, "home")
             return max(0.0, 1.0 - away_p - home_p)
 
-        invert = side == "away"
-        behind_target = features.get("home_behind", 0.0) if not invert else 0.0
-        if invert and features.get("score_pressure", 0.0) > 0 and not features.get("home_behind", 0.0):
-            behind_target = 1.0  # away is the side behind (home leads)
-        gap = features.get("possession_gap", 0.0)
-        pos_gap = -gap if invert else gap
-        acc_gap = features.get("shot_accuracy_gap", 0.0)
-        shot_gap = -acc_gap if invert else acc_gap
-        divergence = features.get("divergence", 0.0)
-        div = -divergence if invert else divergence
-        score = (
-            div * 0.35
-            + features.get("danger_intensity", 1.0) * 0.30
-            + pos_gap * 0.20
-            + shot_gap * 0.15
-            + behind_target * 1.20
-        )
+        x = cls.score_inputs(snapshot, side)
+        calib = cls._calibrated()
+        if calib is not None:
+            weights = [float(w) for w in calib["weights"]]
+            bias = float(calib.get("bias", 0.0))
+        else:
+            weights = SHIM_WEIGHTS
+            bias = 0.0
+        score = bias + sum(w * xi for w, xi in zip(weights, x))
         return 1.0 / (1.0 + (2.718281828459045 ** (-score)))  # bounded (0,1)
 
     def dispatch(self, verdict: Verdict) -> dict[str, Any]:

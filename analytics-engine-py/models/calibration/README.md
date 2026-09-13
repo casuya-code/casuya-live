@@ -6,6 +6,9 @@
 # expectations to compare against live momentum.
 
 # distributions.json         -> per-league shot/danger/possession baselines
+# weights.json               -> fitted logistic weights (+bias) for win-probability;
+#                              written by scripts/calibrate.py, absent while the
+#                              offline fit has no signal (shim stays in force)
 # decay_matrix.npz           -> time-decay weight matrix for momentum windows
 # season_trends.csv          -> historical trend datasets per market scope
 # calibration_timeseries.csv -> historical calibration drift snapshots
