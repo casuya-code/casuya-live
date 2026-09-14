@@ -98,6 +98,11 @@ until then the offline shim weights stay in force. `--update-distributions`
 recomputes the per-league `distributions.json` baselines (danger, possession,
 shot accuracy) from the observed frames.
 
+Each run also regenerates the reference datasets shipped with the repo:
+`decay_matrix.csv` (time-decay across the study window's minute buckets),
+`season_trends.csv` (per-league outcome rates plus minute-band baselines), and
+appends one drift-snapshot row to `calibration_timeseries.csv`.
+
 ## Testing
 
 ```powershell

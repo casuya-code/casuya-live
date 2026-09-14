@@ -1,0 +1,4 @@
+generated_at,status,rows,cycles,frames,bias,w_divergence,w_danger_intensity,w_possession_gap,w_shot_accuracy_gap,w_behind_target,accuracy,brier
+2026-09-14T04:10:52+00:00,refused,6920,134,1997,-6.388388,0.0,-0.0,0.0,0.0,0.0,1.0,0.0
+2026-09-14T04:13:50+00:00,adopted,6932,134,2000,0.027512,0.135433,3.482294,15.009263,12.307475,-3.935772,1.0,0.0
+2026-09-14T04:16:29+00:00,adopted,6932,134,2000,0.027512,0.135433,3.482294,15.009263,12.307475,-3.935772,1.0,0.0

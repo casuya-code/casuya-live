@@ -9,6 +9,9 @@
 # weights.json               -> fitted logistic weights (+bias) for win-probability;
 #                              written by scripts/calibrate.py, absent while the
 #                              offline fit has no signal (shim stays in force)
-# decay_matrix.npz           -> time-decay weight matrix for momentum windows
-# season_trends.csv          -> historical trend datasets per market scope
-# calibration_timeseries.csv -> historical calibration drift snapshots
+# decay_matrix.csv           -> exponential time-decay weighting across the
+#                              study window's 60s aggregation buckets
+# season_trends.csv          -> historical trend dataset: per-league outcome
+#                              rates and minute-band baselines
+# calibration_timeseries.csv -> run-by-run drift snapshots (status, weights,
+#                              accuracy, Brier); one row appended per run

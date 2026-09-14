@@ -1,0 +1,20 @@
+{
+  "bias": 0.027512,
+  "features": [
+    "divergence",
+    "danger_intensity",
+    "possession_gap",
+    "shot_accuracy_gap",
+    "behind_target"
+  ],
+  "generated_at": "2026-09-14T04:16:29+00:00",
+  "rows": 6932,
+  "version": 2,
+  "weights": [
+    0.135433,
+    3.482294,
+    15.009263,
+    12.307475,
+    -3.935772
+  ]
+}
