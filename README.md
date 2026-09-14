@@ -86,33 +86,42 @@ The win-probability weights are fitted offline from the durable frame history
 (`matches:live` stream entries carry the full frame under `data`):
 
 ```powershell
-python analytics-engine-py/scripts/calibrate.py --frames 2000 --update-distributions
+python analytics-engine-py/scripts/calibrate.py --frames 2000 --update-distributions [--l2 1e-3]
 ```
 
-It regroups frames into complete match cycles, builds home/away training rows
-labeling by the final score, and fits a pure-stdlib logistic regression over the
-exact `FilterEngine.score_inputs` vector the live filter consumes. A
-signal-less fit (draw-heavy history, too few rows) is rejected outright, so
-`models/calibration/weights.json` only appears when the data supports it —
-until then the offline shim weights stay in force. `--update-distributions`
-recomputes the per-league `distributions.json` baselines (danger, possession,
-shot accuracy) from the observed frames.
+It regroups frames into complete match cycles, replays them through the study
+using each frame's own `received_at` timestamp (so offline folding matches the
+live windows exactly), builds home/away training rows labeled by the final
+score, splits chronologically (80% training / 20% validation by cycle), and
+fits a pure-stdlib logistic regression with an L2 ridge penalty over the exact
+`FilterEngine.score_inputs` vector the live filter consumes. The adoption gate
+rejects the fit (shim stays in force) when history is too thin, the features
+carry no signal, or the model's validation logloss is no better than the naive
+baseline. `--update-distributions` recomputes the per-league
+`distributions.json` baselines (danger, possession, shot accuracy) from the
+observed frames.
 
 Each run also regenerates the reference datasets shipped with the repo:
 `decay_matrix.csv` (time-decay across the study window's minute buckets),
 `season_trends.csv` (per-league outcome rates plus minute-band baselines), and
-appends one drift-snapshot row to `calibration_timeseries.csv`.
+appends one drift-snapshot row to `calibration_timeseries.csv`. Fit health is
+mirrored to the redis `calibration:model` hash so the dashboard's Model
+Accuracy panel can render it via the relay's `GET /api/stats`.
 
 ## Testing
 
 ```powershell
 go test ./...   # in each data-ingestion-go / execution-engine-go (vet runs locally now)
-python tests/smoke_test.py   # in analytics-engine-py
+python tests/test_calibrate.py   # in analytics-engine-py (fit, metrics, gate)
+python tests/test_feature_study.py   # in analytics-engine-py (replay parity, monotonicity, windows)
+python tests/smoke_test.py   # in analytics-engine-py (end-to-end pipeline)
+REDIS_URL=redis://localhost:6379/0 node test_stats.js   # in web-interface-js/backend
 npm run build --prefix web-interface-js/frontend
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same suite: Go build+vet+test, the
-Python smoke tests, and the frontend build.
+Python calibrate/feature-study/smoke tests, the web-relay stats test against a
+Redis service container, and the frontend build.
 
 ## Security notes
 

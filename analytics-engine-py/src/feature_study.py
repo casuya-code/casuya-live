@@ -92,10 +92,16 @@ def _parse_clock_minute(clock: str) -> float | None:
 
 
 class FeatureStudy:
-    """Sliding-window observer keyed per match and scoped market."""
+    """Sliding-window observer keyed per match and scoped market.
+
+    A frame can be observed with an explicit `asof` timestamp so offline
+    calibration replays the exact live windowing/bucketing semantics instead
+    of collapsing history onto one wall-clock instant.
+    """
 
     def __init__(self) -> None:
         self._windows: dict[str, list[StudyEntry]] = {}
+        self._monotonic: dict[str, dict[str, int]] = {}
         self._baselines = self._load_baselines()
 
     @staticmethod
@@ -123,16 +129,20 @@ class FeatureStudy:
     def _is_boundary(clock: Any) -> bool:
         return str(clock or "").strip().upper() in BOUNDARY_CLOCKS
 
-    def observe(self, frame: dict[str, Any]) -> MomentumFrame | None:
+    def observe(self, frame: dict[str, Any], asof: float | None = None) -> MomentumFrame | None:
         """Append the frame and fold it into a snapshot for its first market.
 
         Prefer observe_many() when a frame carries several scoped markets.
         """
-        snapshots = self.observe_many(frame)
+        snapshots = self.observe_many(frame, asof=asof)
         return snapshots[0] if snapshots else None
 
-    def observe_many(self, frame: dict[str, Any]) -> list[MomentumFrame]:
-        """Append the frame once, then fold one snapshot per scoped market."""
+    def observe_many(self, frame: dict[str, Any], asof: float | None = None) -> list[MomentumFrame]:
+        """Append the frame once, then fold one snapshot per scoped market.
+
+        `asof` pins the observation clock (epoch seconds) so replay matches
+        live windowing; when omitted the caller's wall clock is used.
+        """
         match_id = frame.get("match_id")
         clock = frame.get("clock", "")
         if not match_id or clock is None or str(clock) == "":
@@ -144,17 +154,40 @@ class FeatureStudy:
         if not mark:
             return []
         score_home, score_away = self._scores(frame)
-        now = time.time()
+        now = asof if asof is not None else time.time()
         window = self._windows.setdefault(match_id, [])
+
+        # Monotonicity guard: shot/danger counters arrive as live cumulative
+        # totals. A provider reset (value lower than previously seen for this
+        # match) must not silently rewind the momentum window.
+        mono = self._monotonic.setdefault(
+            match_id, {"shots": 0, "shots_on_target": 0, "dangerous_attacks": 0}
+        )
+        shots = int(frame.get("shots", 0))
+        shots_on_target = int(frame.get("shots_on_target", 0))
+        dangerous_attacks = int(frame.get("dangerous_attacks", 0))
+        if shots < mono["shots"]:
+            shots = mono["shots"]
+        else:
+            mono["shots"] = shots
+        if shots_on_target < mono["shots_on_target"]:
+            shots_on_target = mono["shots_on_target"]
+        else:
+            mono["shots_on_target"] = shots_on_target
+        if dangerous_attacks < mono["dangerous_attacks"]:
+            dangerous_attacks = mono["dangerous_attacks"]
+        else:
+            mono["dangerous_attacks"] = dangerous_attacks
+
         window.append(
             StudyEntry(
                 ts=now,
                 clock=str(clock),
                 score_home=score_home,
                 score_away=score_away,
-                shots=int(frame.get("shots", 0)),
-                shots_on_target=int(frame.get("shots_on_target", 0)),
-                dangerous_attacks=int(frame.get("dangerous_attacks", 0)),
+                shots=shots,
+                shots_on_target=shots_on_target,
+                dangerous_attacks=dangerous_attacks,
                 possession_home=float(frame.get("possession_home", 0.5)),
             )
         )
@@ -271,8 +304,15 @@ class FeatureStudy:
         return snapshot.shots_on_target / snapshot.shots_total
 
     def expected_danger(self, snapshot: MomentumFrame) -> float:
-        """Baseline expectation for dangerous attacks over the study window."""
-        minutes = WINDOW_SECONDS / 60.0
+        """Baseline expectation for dangerous attacks over the study window.
+
+        Normalised by the window actually observed so far (not the full
+        configured window): a match that just kicked off gets a smaller honest
+        expectation than a settled long window, keeping early momentum fair.
+        """
+        span = snapshot.window_end - snapshot.window_start
+        minutes = max(span, 30.0) / 60.0  # floor: one plausible minute bucket
+        minutes = min(minutes, WINDOW_SECONDS / 60.0)
         return self._baseline_for(snapshot)["danger_per_minute"] * minutes
 
     def divergence(self, snapshot: MomentumFrame) -> float:

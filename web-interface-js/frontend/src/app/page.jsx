@@ -3,6 +3,7 @@
 import LiveBetsGrid from "../components/LiveBetsGrid";
 import DiagnosticsLog from "../components/DiagnosticsLog";
 import ExecutionPanel from "../components/ExecutionPanel";
+import ModelAccuracyPanel from "../components/ModelAccuracyPanel";
 import useWebSockets from "../hooks/useWebSockets";
 
 export default function Page() {
@@ -56,6 +57,7 @@ export default function Page() {
 
         <LiveBetsGrid matches={matches} lastEvent={lastEvent} />
         <ExecutionPanel pnl={pnl} />
+        <ModelAccuracyPanel />
         <DiagnosticsLog entries={diagnostics} />
 
         <footer className="page-foot">

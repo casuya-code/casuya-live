@@ -1,4 +1,3 @@
-generated_at,status,rows,cycles,frames,bias,w_divergence,w_danger_intensity,w_possession_gap,w_shot_accuracy_gap,w_behind_target,accuracy,brier
-2026-09-14T04:10:52+00:00,refused,6920,134,1997,-6.388388,0.0,-0.0,0.0,0.0,0.0,1.0,0.0
-2026-09-14T04:13:50+00:00,adopted,6932,134,2000,0.027512,0.135433,3.482294,15.009263,12.307475,-3.935772,1.0,0.0
-2026-09-14T04:16:29+00:00,adopted,6932,134,2000,0.027512,0.135433,3.482294,15.009263,12.307475,-3.935772,1.0,0.0
+generated_at,status,rows,cycles,frames,l2,bias,w_divergence,w_danger_intensity,w_possession_gap,w_shot_accuracy_gap,w_behind_target,train_accuracy,train_brier,val_accuracy,val_brier,val_auc,baseline_logloss,model_logloss
+2026-09-14T10:34:54+00:00,adopted,6916,133,1995,0.001,-1.164004,-0.247098,0.029887,-121.494876,5.182241,-5.707621,1.0,0.0,1.0,0.0,1.0,0.6931,0.0016
+2026-09-14T10:48:23+00:00,adopted,6936,134,2000,0.001,-1.168513,-0.246798,0.029916,-121.331231,5.160069,-5.711297,1.0,0.0,1.0,0.0,1.0,0.6931,0.0016

@@ -36,7 +36,31 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: python tests/test_calibrate.py
+      - run: python tests/test_feature_study.py
       - run: python tests/smoke_test.py
+
+  web-relay:
+    name: web relay stats
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    defaults:
+      run:
+        working-directory: web-interface-js/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web-interface-js/backend/package-lock.json
+      - run: node --check server.js
+      - run: npm ci
+      - run: REDIS_URL=redis://localhost:6379/0 node test_stats.js
 
   frontend:
     name: web interface
