@@ -1,6 +1,6 @@
 league,minute_band,fields,n,home_win_rate,draw_rate,away_win_rate,avg_goals,danger_per_minute,possession_home,shot_accuracy
-england_premier_league,30-45,band,532,,,,,0.288,0.348,0.163
-england_premier_league,45-60,band,399,,,,,0.271,0.323,0.206
-england_premier_league,60-75,band,268,,,,,0.261,0.315,0.252
-england_premier_league,75-90,band,535,,,,,0.233,0.322,0.29
-england_premier_league,FULL,outcomes,134,0.0,0.0,1.0,3.0,,,
+england_premier_league,30-45,band,400,,,,,0.288,0.347,0.163
+england_premier_league,45-60,band,300,,,,,0.271,0.323,0.206
+england_premier_league,60-75,band,200,,,,,0.261,0.315,0.252
+england_premier_league,75-90,band,400,,,,,0.233,0.323,0.29
+england_premier_league,FULL,outcomes,100,0.0,0.0,1.0,3.0,,,

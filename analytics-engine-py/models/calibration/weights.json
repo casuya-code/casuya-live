@@ -1,6 +1,6 @@
 {
   "baseline_logloss": 0.6931,
-  "bias": -1.168513,
+  "bias": -1.144442,
   "features": [
     "divergence",
     "danger_intensity",
@@ -8,22 +8,22 @@
     "shot_accuracy_gap",
     "behind_target"
   ],
-  "generated_at": "2026-09-14T10:48:23+00:00",
+  "generated_at": "2026-09-14T14:56:06+00:00",
   "l2": 0.001,
-  "model_logloss": 0.0016,
+  "model_logloss": 0.0018,
   "train_accuracy": 1.0,
   "train_brier": 0.0,
-  "train_rows": 5536,
+  "train_rows": 4160,
   "val_accuracy": 1.0,
   "val_auc": 1.0,
   "val_brier": 0.0,
-  "val_rows": 1400,
+  "val_rows": 1040,
   "version": 3,
   "weights": [
-    -0.246798,
-    0.029916,
-    -121.331231,
-    5.160069,
-    -5.711297
+    -0.245584,
+    0.029701,
+    -122.579033,
+    5.085927,
+    -5.702448
   ]
 }

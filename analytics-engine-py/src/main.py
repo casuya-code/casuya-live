@@ -10,10 +10,11 @@ import dataclasses
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import redis.asyncio as redis
 
-from feature_study import FeatureStudy
+from feature_study import BASE_DIR, FeatureStudy
 from filter_engine import FilterEngine
 from diagnostics import DiagnosticsEngine, DIAG_CHANNEL
 from position_gate import PositionGate
@@ -41,8 +42,61 @@ class AnalyticsBroker:
         self.frames: asyncio.Queue = asyncio.Queue(maxsize=4096)
         self.dropped = 0
 
+    def _mirror_model_hash_fields(self) -> dict[str, str] | None:
+        """Re-publish calibration:model from the persisted weights file.
+
+        Redis restarts wipe the calibrator's hash; reloading it from
+        weights.json at startup keeps the dashboard model card alive without
+        requiring an offline calibrate run.
+        """
+        try:
+            weights_file = BASE_DIR / "models" / "calibration" / "weights.json"
+            if not weights_file.exists():
+                return None
+            data = json.loads(weights_file.read_text(encoding="utf-8"))
+            if not isinstance(data.get("weights"), list):
+                return None
+            mapping: dict[str, str] = {"status": "adopted"}
+            mapped_keys = (
+                "generated_at", "features", "train_rows", "val_rows", "bias",
+                "l2", "train_accuracy", "train_brier", "val_accuracy",
+                "val_brier", "val_auc", "baseline_logloss", "model_logloss",
+            )
+            for key in mapped_keys:
+                if key in data:
+                    mapping[key] = (
+                        data[key] if isinstance(data[key], str) else json.dumps(data[key])
+                    )
+            mapping["weights"] = "[" + ",".join(
+                f"{round(w, 6)}" for w in data["weights"]
+            ) + "]"
+            mapping["rows"] = str(
+                (data.get("train_rows", 0) or 0) + (data.get("val_rows", 0) or 0)
+            )
+            return mapping
+        except Exception:
+            LOG.exception("unable to load weights.json for model mirror")
+            return None
+
+    async def _mirror_model_hash(self, r: redis.Redis) -> None:
+        mapping = self._mirror_model_hash_fields()
+        if not mapping:
+            return
+        try:
+            await r.hset("calibration:model", mapping=mapping)
+            await r.set(
+                "calibration:heartbeat",
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                ex=3600,
+            )
+            await r.expire("calibration:model", 7 * 86400)
+            LOG.info("mirrored calibration:model from weights.json (adopted)")
+        except Exception as exc:  # Redis offline must not abort startup
+            LOG.warning("model mirror skipped: %s", exc)
+
     async def run(self) -> None:
         r = redis.from_url(self.redis_url, decode_responses=True)
+        await self._mirror_model_hash(r)
         pubsub = r.pubsub()
         await pubsub.subscribe(CHANNEL_IN)
         LOG.info("subscribed to %s", CHANNEL_IN)

@@ -51,9 +51,10 @@ const redisClient = redisPublisher();
 
 function publishSettlement(numberOfCycle, finalScore) {
   const orders = [];
-  for (const [, o] of book) {
-    if (o.cycle === numberOfCycle) orders.push(o);
-  }
+  for (const [, o] of book) orders.push(o);
+  // Grade every unsettled fill against this FULLTIME. A fill can be tagged
+  // with the previous cycle number when the fill and the settling FULLTIME
+  // straddle a 40s boundary; pairing by cycle would silently drop the order.
   const frame = {
     type: "settlement",
     cycle: numberOfCycle,
@@ -125,23 +126,57 @@ function frame(match) {
 // Low-tempo match. Casual United (away) dominate possession; their 2H price
 // drifts to >= 5.0 by the 41st minute, which the analytics trigger requires.
 // Home stays favourite so its legs are filtered below MIN_TRIGGER_ODDS.
-const SCHEDULE = [
-  { step: 0, clock: "31", score: [0, 0], o1h: [2.1, 3.4, 4.4], o2h: [2.2, 3.5, 4.6], stats: { shots: 3, shots_on_target: 0, dangerous_attacks: 9, possession_home: 0.36 } },
-  { step: 1, clock: "34", score: [0, 0], o1h: [2.1, 3.4, 4.5], o2h: [2.2, 3.5, 4.7], stats: { shots: 4, shots_on_target: 1, dangerous_attacks: 10, possession_home: 0.35 } },
-  { step: 2, clock: "37", score: [0, 1], o1h: [2.2, 3.5, 4.6], o2h: [2.35, 3.6, 4.9], stats: { shots: 5, shots_on_target: 1, dangerous_attacks: 11, possession_home: 0.34 } },
-  { step: 3, clock: "41", score: [0, 1], o1h: [2.3, 3.5, 4.7], o2h: [2.45, 3.6, 5.1], stats: { shots: 5, shots_on_target: 1, dangerous_attacks: 11, possession_home: 0.34 } },
-  { step: 4, clock: "45", score: [0, 1], o1h: [2.3, 3.5, 4.8], o2h: [2.5, 3.6, 5.2], stats: { shots: 6, shots_on_target: 1, dangerous_attacks: 12, possession_home: 0.33 } },
-  { step: 5, clock: "HT", score: [0, 1], o1h: [2.3, 3.5, 4.8], o2h: [2.5, 3.6, 5.2], stats: { shots: 6, shots_on_target: 1, dangerous_attacks: 12, possession_home: 0.33 } },
-  { step: 6, clock: "52", score: [0, 1], o1h: [2.4, 3.6, 4.8], o2h: [2.6, 3.7, 5.4], stats: { shots: 8, shots_on_target: 2, dangerous_attacks: 14, possession_home: 0.32 } },
-  { step: 7, clock: "58", score: [0, 2], o1h: [2.5, 3.7, 4.9], o2h: [2.7, 3.8, 5.6], stats: { shots: 10, shots_on_target: 2, dangerous_attacks: 16, possession_home: 0.32 } },
-  { step: 8, clock: "64", score: [0, 2], o1h: [2.6, 3.7, 4.9], o2h: [2.8, 3.8, 5.9], stats: { shots: 11, shots_on_target: 3, dangerous_attacks: 17, possession_home: 0.32 } },
-  { step: 9, clock: "70", score: [0, 2], o1h: [2.7, 3.8, 5.0], o2h: [3.0, 3.9, 6.3], stats: { shots: 13, shots_on_target: 3, dangerous_attacks: 18, possession_home: 0.31 } },
-  { step: 10, clock: "76", score: [0, 2], o1h: [2.8, 3.8, 5.1], o2h: [3.1, 4.0, 6.8], stats: { shots: 14, shots_on_target: 4, dangerous_attacks: 19, possession_home: 0.31 } },
-  { step: 11, clock: "82", score: [1, 2], o1h: [2.9, 3.9, 5.2], o2h: [3.3, 4.1, 7.2], stats: { shots: 15, shots_on_target: 4, dangerous_attacks: 19, possession_home: 0.32 } },
-  { step: 12, clock: "88", score: [1, 2], o1h: [3.1, 3.9, 5.3], o2h: [3.5, 4.1, 7.8], stats: { shots: 16, shots_on_target: 5, dangerous_attacks: 20, possession_home: 0.33 } },
-  { step: 13, clock: "90", score: [1, 2], o1h: [3.2, 4.0, 5.4], o2h: [3.6, 4.2, 8.2], stats: { shots: 17, shots_on_target: 5, dangerous_attacks: 20, possession_home: 0.33 } },
-  { step: 14, clock: "FULLTIME", score: [1, 2], o1h: [3.2, 4.0, 5.4], o2h: [3.6, 4.2, 8.2], stats: { shots: 17, shots_on_target: 5, dangerous_attacks: 20, possession_home: 0.33 } },
+// The result is NOT deterministic per cycle: each ingestor connection rolls a
+// scenario (away win ~72%, draw ~18%, home win ~10%) so the system must
+// occasionally grade LOST bets, driving negative PnL and drift audits.
+const TEMPLATE = [
+  { step: 0, clock: "31", o1h: [2.1, 3.4, 4.4], o2h: [2.2, 3.5, 4.6], stats: { shots: 3, shots_on_target: 0, dangerous_attacks: 9, possession_home: 0.36 } },
+  { step: 1, clock: "34", o1h: [2.1, 3.4, 4.5], o2h: [2.2, 3.5, 4.7], stats: { shots: 4, shots_on_target: 1, dangerous_attacks: 10, possession_home: 0.35 } },
+  { step: 2, clock: "37", o1h: [2.2, 3.5, 4.6], o2h: [2.35, 3.6, 4.9], stats: { shots: 5, shots_on_target: 1, dangerous_attacks: 11, possession_home: 0.34 } },
+  { step: 3, clock: "41", o1h: [2.3, 3.5, 4.7], o2h: [2.45, 3.6, 5.1], stats: { shots: 5, shots_on_target: 1, dangerous_attacks: 11, possession_home: 0.34 } },
+  { step: 4, clock: "45", o1h: [2.3, 3.5, 4.8], o2h: [2.5, 3.6, 5.2], stats: { shots: 6, shots_on_target: 1, dangerous_attacks: 12, possession_home: 0.33 } },
+  { step: 5, clock: "HT", o1h: [2.3, 3.5, 4.8], o2h: [2.5, 3.6, 5.2], stats: { shots: 6, shots_on_target: 1, dangerous_attacks: 12, possession_home: 0.33 } },
+  { step: 6, clock: "52", o1h: [2.4, 3.6, 4.8], o2h: [2.6, 3.7, 5.4], stats: { shots: 8, shots_on_target: 2, dangerous_attacks: 14, possession_home: 0.32 } },
+  { step: 7, clock: "58", o1h: [2.5, 3.7, 4.9], o2h: [2.7, 3.8, 5.6], stats: { shots: 10, shots_on_target: 2, dangerous_attacks: 16, possession_home: 0.32 } },
+  { step: 8, clock: "64", o1h: [2.6, 3.7, 4.9], o2h: [2.8, 3.8, 5.9], stats: { shots: 11, shots_on_target: 3, dangerous_attacks: 17, possession_home: 0.32 } },
+  { step: 9, clock: "70", o1h: [2.7, 3.8, 5.0], o2h: [3.0, 3.9, 6.3], stats: { shots: 13, shots_on_target: 3, dangerous_attacks: 18, possession_home: 0.31 } },
+  { step: 10, clock: "76", o1h: [2.8, 3.8, 5.1], o2h: [3.1, 4.0, 6.8], stats: { shots: 14, shots_on_target: 4, dangerous_attacks: 19, possession_home: 0.31 } },
+  { step: 11, clock: "82", o1h: [2.9, 3.9, 5.2], o2h: [3.3, 4.1, 7.2], stats: { shots: 15, shots_on_target: 4, dangerous_attacks: 19, possession_home: 0.32 } },
+  { step: 12, clock: "88", o1h: [3.1, 3.9, 5.3], o2h: [3.5, 4.1, 7.8], stats: { shots: 16, shots_on_target: 5, dangerous_attacks: 20, possession_home: 0.33 } },
+  { step: 13, clock: "90", o1h: [3.2, 4.0, 5.4], o2h: [3.6, 4.2, 8.2], stats: { shots: 17, shots_on_target: 5, dangerous_attacks: 20, possession_home: 0.33 } },
+  { step: 14, clock: "FULLTIME", o1h: [3.2, 4.0, 5.4], o2h: [3.6, 4.2, 8.2], stats: { shots: 17, shots_on_target: 5, dangerous_attacks: 20, possession_home: 0.33 } },
 ];
+
+// Per-scenario score trajectories (same in-play timing/odds, different result).
+const SCORELINES = {
+  away: [ // FT 1-2, away wins (baseline)
+    [0, 0], [0, 0], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 2], [0, 2], [0, 2], [0, 2], [1, 2], [1, 2], [1, 2], [1, 2],
+  ],
+  draw: [ // FT 1-1, home equalises late
+    [0, 0], [0, 0], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1],
+  ],
+  home: [ // FT 2-1, home comeback
+    [0, 0], [0, 0], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [1, 1], [1, 1], [2, 1], [2, 1], [2, 1], [2, 1], [2, 1], [2, 1],
+  ],
+};
+
+const SCENARIO_WEIGHTS = [
+  { id: "away", weight: 72 },
+  { id: "draw", weight: 18 },
+  { id: "home", weight: 10 },
+];
+
+function pickScenario() {
+  const forced = process.env.MOCK_SCENARIO;
+  if (forced && SCORELINES[forced]) return forced;
+  const roll = Math.random() * 100;
+  let acc = 0;
+  for (const s of SCENARIO_WEIGHTS) {
+    acc += s.weight;
+    if (roll < acc) return s.id;
+  }
+  return "away";
+}
 
 function vendorServer() {
   const wss = new WebSocketServer({ port: VENDOR_PORT, path: "/vendor" });
@@ -149,14 +184,16 @@ function vendorServer() {
   wss.on("connection", (socket) => {
     console.log("[mock-vendor] ingestor connected");
     const kickoff = Math.floor(Date.now() / 1000) - 31 * 60;
+    const scenario = pickScenario();
+    console.log(`[mock-vendor] cycle scenario: ${scenario}`);
     let guard = 0;
     const timer = setInterval(() => {
-      if (socket.readyState !== socket.OPEN || guard >= SCHEDULE.length) {
+      if (socket.readyState !== socket.OPEN || guard >= TEMPLATE.length) {
         clearInterval(timer);
         if (socket.readyState === socket.OPEN) socket.close();
         return;
       }
-      const step = SCHEDULE[guard];
+      const step = { ...TEMPLATE[guard], score: SCORELINES[scenario][guard] };
       const streamed = frame({ ...step, kickoff });
       socket.send(JSON.stringify(streamed));
       const minute = step.clock;

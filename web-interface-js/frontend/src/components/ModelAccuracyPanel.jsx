@@ -203,6 +203,7 @@ export default function ModelAccuracyPanel({ token }) {
                 <span style={{ color: "var(--go)" }}>{stats.outcomes?.won || 0}</span>
                 <span style={{ color: "var(--text-3)" }}> / </span>
                 <span style={{ color: "var(--danger)" }}>{stats.outcomes?.lost || 0}</span>
+                {"  "}
                 <span style={{ fontSize: "13px", color: "var(--text-3)", marginLeft: "10px" }}>net {Number(stats.outcomes?.net || 0).toFixed(2)}</span>
               </div>
             </div>
@@ -212,6 +213,7 @@ export default function ModelAccuracyPanel({ token }) {
                 <span style={{ color: Number(stats.pnl?.net) >= 0 ? "var(--go)" : "var(--danger)" }}>
                   {Number(stats.pnl?.net || 0).toFixed(2)}
                 </span>
+                {"  "}
                 <span style={{ fontSize: "13px", color: "var(--text-3)", marginLeft: "10px" }}>
                   cycle {stats.pnl?.updated_cycle ?? "—"}
                 </span>
