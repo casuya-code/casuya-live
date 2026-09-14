@@ -55,3 +55,26 @@ func TestSettleOrders(t *testing.T) {
 		}
 	}
 }
+
+func TestSettlementTotals(t *testing.T) {
+	settled := []SettledOrder{
+		{SettlementOrder: SettlementOrder{OrderID: "M1"}, Result: "won", Pnl: 180},
+		{SettlementOrder: SettlementOrder{OrderID: "M2"}, Result: "won", Pnl: 65},
+		{SettlementOrder: SettlementOrder{OrderID: "M3"}, Result: "lost", Pnl: -25},
+		{SettlementOrder: SettlementOrder{OrderID: "M4"}, Result: "lost", Pnl: -25},
+		{SettlementOrder: SettlementOrder{OrderID: "M5"}, Result: "void", Pnl: 0},
+	}
+	net, won, lost := settlementTotals(settled)
+	if net != 195 {
+		t.Fatalf("net = %v, want 195", net)
+	}
+	if won != 2 {
+		t.Fatalf("won = %d, want 2", won)
+	}
+	if lost != 2 {
+		t.Fatalf("lost = %d, want 2", lost)
+	}
+	if _, _, lost2 := settlementTotals(nil); lost2 != 0 {
+		t.Fatalf("empty settlement should stay flat, got lost=%d", lost2)
+	}
+}

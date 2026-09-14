@@ -120,3 +120,18 @@ func settleOrders(orders []SettlementOrder, home, away float64) []SettledOrder {
 	}
 	return settled
 }
+
+// settlementTotals derives the per-settlement contribution from graded fills.
+// The executor must persist these deltas, never the cumulative session.
+func settlementTotals(settled []SettledOrder) (net float64, won, lost int) {
+	for _, so := range settled {
+		net += so.Pnl
+		switch so.Result {
+		case "won":
+			won++
+		case "lost":
+			lost++
+		}
+	}
+	return net, won, lost
+}

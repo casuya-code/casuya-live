@@ -101,13 +101,13 @@ shot accuracy) from the observed frames.
 ## Testing
 
 ```powershell
-go test -vet=off ./...   # in each data-ingestion-go / execution-engine-go
+go test ./...   # in each data-ingestion-go / execution-engine-go (vet runs locally now)
 python tests/smoke_test.py   # in analytics-engine-py
 npm run build --prefix web-interface-js/frontend
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of the above on GitHub, where `go vet`
-is not App-Control-blocked, so `go test ./...` is used there.
+CI (`.github/workflows/ci.yml`) runs the same suite: Go build+vet+test, the
+Python smoke tests, and the frontend build.
 
 ## Security notes
 

@@ -169,21 +169,12 @@ func (b *Broker) settleLoop(ctx context.Context) {
 // grade applies settlement to the broker's session totals.
 func (b *Broker) grade(s *Settlement) *PnlSnapshot {
 	settled := settleOrders(s.Orders, s.FinalScore.Home, s.FinalScore.Away)
-	var net float64
-	for _, so := range settled {
-		net += so.Pnl
-	}
+	net, won, lost := settlementTotals(settled)
 
 	b.mu.Lock()
 	b.session.Net += net
-	for _, so := range settled {
-		switch so.Result {
-		case "won":
-			b.session.Won++
-		case "lost":
-			b.session.Lost++
-		}
-	}
+	b.session.Won += won
+	b.session.Lost += lost
 	snap := &PnlSnapshot{
 		Type:       "pnl",
 		Cycle:      s.Cycle,
@@ -214,15 +205,17 @@ func (b *Broker) forget(settled []SettledOrder) {
 }
 
 // persistSession backs the running totals into a Redis hash so a restart or a
-// second operator view can read the accumulated bankroll.
+// second operator view can read the accumulated bankroll. Only the current
+// settlement's deltas are written; the in-memory session is cumulative.
 func (b *Broker) persistSession(ctx context.Context, s *PnlSnapshot) {
 	if len(s.Settled) == 0 {
 		return
 	}
+	net, won, lost := settlementTotals(s.Settled)
 	pipe := b.rdb.TxPipeline()
-	pipe.HIncrByFloat(ctx, b.cfg.PnlHash, "net", s.Session.Net)
-	pipe.HIncrBy(ctx, b.cfg.PnlHash, "won", int64(s.Session.Won))
-	pipe.HIncrBy(ctx, b.cfg.PnlHash, "lost", int64(s.Session.Lost))
+	pipe.HIncrByFloat(ctx, b.cfg.PnlHash, "net", net)
+	pipe.HIncrBy(ctx, b.cfg.PnlHash, "won", int64(won))
+	pipe.HIncrBy(ctx, b.cfg.PnlHash, "lost", int64(lost))
 	pipe.HSet(ctx, b.cfg.PnlHash, "updated_cycle", s.Cycle)
 	if _, err := pipe.Exec(ctx); err != nil {
 		log.Printf("pnl hash update failed: %v", err)
