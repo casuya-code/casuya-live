@@ -20,6 +20,15 @@ function decodePayload(envelope) {
   }
 }
 
+// The relay relays the raw envelope: JSON messages arrive as the parsed
+// object, but the signed command envelope is a bare string, which the relay
+// wraps as { raw: "<envelope>" }.
+function decodeEnvelope(cmd) {
+  const source =
+    typeof cmd === "string" ? cmd : cmd?.payload || cmd?.raw || cmd;
+  return decodePayload(source);
+}
+
 export default function CommandsLog({ commands }) {
   if (!commands.length) {
     return (
@@ -56,7 +65,7 @@ export default function CommandsLog({ commands }) {
         style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 300px), 1fr))" }}
       >
         {commands.map((cmd, idx) => {
-          const payload = decodePayload(cmd?.payload || cmd);
+          const payload = decodeEnvelope(cmd);
           return (
             <div
               key={`${cmd?.order_id || idx}`}
