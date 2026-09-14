@@ -1,6 +1,6 @@
 {
-  "baseline_logloss": 0.6853,
-  "bias": -1.186661,
+  "baseline_logloss": 0.6802,
+  "bias": -1.678014,
   "features": [
     "divergence",
     "danger_intensity",
@@ -8,22 +8,22 @@
     "shot_accuracy_gap",
     "behind_target"
   ],
-  "generated_at": "2026-09-14T17:49:25+00:00",
+  "generated_at": "2026-09-14T18:04:30+00:00",
   "l2": 0.001,
-  "model_logloss": 0.4392,
-  "train_accuracy": 0.8203,
-  "train_brier": 0.1286,
-  "train_rows": 4920,
-  "val_accuracy": 0.8157,
-  "val_auc": 0.8762,
-  "val_brier": 0.1296,
-  "val_rows": 1248,
+  "model_logloss": 0.4757,
+  "train_accuracy": 0.8734,
+  "train_brier": 0.097,
+  "train_rows": 4944,
+  "val_accuracy": 0.8102,
+  "val_auc": 0.8709,
+  "val_brier": 0.1344,
+  "val_rows": 1296,
   "version": 3,
   "weights": [
-    -0.039569,
-    0.013553,
-    -11.678251,
-    -0.578912,
-    -3.267787
+    -0.065689,
+    0.016809,
+    -20.562281,
+    -0.371527,
+    -4.011181
   ]
 }

@@ -29,6 +29,13 @@ LOG = logging.getLogger("casuya.filter")
 MIN_ODDS = float(os.getenv("MIN_TRIGGER_ODDS", "5.0"))
 MARGIN_SLACK = float(os.getenv("TRUE_PROB_MARGIN_SLACK", "0.020"))  # 2pp safety
 
+# Post-hoc model calibration (remedies runaway logits from unnormalised
+# features): temperature scaling divides the raw logistic score before the
+# sigmoid (T > 1 compresses probabilities toward 0.5), and MAX_TRUE_PROB caps
+# the emitted posterior so live legs can never report 99.9-100% certainty.
+MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "1.5"))
+MAX_TRUE_PROB = float(os.getenv("MAX_TRUE_PROB", "0.85"))
+
 # Column order shared by the live score and offline calibration weights.
 FEATURE_COLS = [
     "divergence",
@@ -214,8 +221,9 @@ class FilterEngine:
         else:
             weights = SHIM_WEIGHTS
             bias = 0.0
-        score = bias + sum(w * xi for w, xi in zip(weights, x))
-        return 1.0 / (1.0 + (2.718281828459045 ** (-score)))  # bounded (0,1)
+        score = (bias + sum(w * xi for w, xi in zip(weights, x))) / MODEL_TEMPERATURE
+        prob = 1.0 / (1.0 + (2.718281828459045 ** (-score)))  # bounded (0,1)
+        return min(prob, MAX_TRUE_PROB)
 
     def dispatch(self, verdict: Verdict) -> dict[str, Any]:
         """Transmit a signed execution payload over the private mesh."""
