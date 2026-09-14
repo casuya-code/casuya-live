@@ -23,8 +23,18 @@ function Start-Svc {
     }
     $out = Join-Path $logs "$Name.out.log"
     $err = Join-Path $logs "$Name.err.log"
-    $p = Start-Process -FilePath $File -ArgumentList $ArgsList -WorkingDirectory $WorkDir `
-        -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+    # PowerShell 5.1 rejects BOTH an empty and a null -ArgumentList; omit the
+    # parameter entirely when the service takes no arguments.
+    $sp = @{
+        FilePath           = $File
+        WorkingDirectory   = $WorkDir
+        WindowStyle        = "Hidden"
+        RedirectStandardOutput = $out
+        RedirectStandardError  = $err
+        PassThru           = $true
+    }
+    if ($ArgsList -and $ArgsList.Count -gt 0) { $sp.ArgumentList = $ArgsList }
+    $p = Start-Process @sp
     $started = (Get-Date)
     while (-not $p.HasExited -and (Get-Date) -lt $started.AddSeconds(1)) { Start-Sleep -Milliseconds 100 }
     if ($p.HasExited) {

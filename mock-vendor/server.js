@@ -80,7 +80,6 @@ const body = JSON.stringify(frame);
   }
   for (const o of orders) book.delete(o.order_id);
 }
-}
 
 function sign(body, secret) {
   return crypto.createHmac("sha256", secret).update(body).digest("base64url");
