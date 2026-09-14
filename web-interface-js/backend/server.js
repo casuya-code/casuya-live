@@ -1,21 +1,23 @@
 "use strict";
 
 const http = require("http");
+const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
 const redis = require("redis");
 
 const PORT = process.env.PORT || 8080;
 const REDIS_URL = process.env.REDIS_URL;
-// NOTE: execution:commands carries HMAC-signed order payloads (stakes,
-// sides, quotes). It is internal-only and must never be relayed to public
-// dashboard clients. Override WS_EXTRA_CHANNELS explicitly if a private
-// operator view ever needs it.
-// execution:pnl is a derived, operator-facing aggregate (graded results and
-// session totals) and is safe to display on the dashboard.
+// Public sockets only ever see the live match feed. Everything else — graded
+// PnL settlements, diagnostics, and the HMAC-signed execution:commands bus —
+// is admin-tier and requires a valid ADMIN_SECRET bearer token.
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+const ADMIN_TOKEN_TTL_SECONDS = 8 * 3600;
+const PUBLIC_CHANNEL = process.env.WS_MATCHES_CHANNEL || "matches:live";
 const WS_CHANNELS = [
-  process.env.WS_MATCHES_CHANNEL || "matches:live",
+  PUBLIC_CHANNEL,
   process.env.WS_DIAG_CHANNEL || "diagnostics:events",
   process.env.WS_PNL_CHANNEL || "execution:pnl",
+  process.env.WS_COMMANDS_CHANNEL || "execution:commands",
   ...(process.env.WS_EXTRA_CHANNELS
     ? process.env.WS_EXTRA_CHANNELS.split(",").map((c) => c.trim()).filter(Boolean)
     : []),
@@ -29,10 +31,58 @@ if (!REDIS_URL) {
 const OUTCOMES_HASH = "stats:outcomes";
 const STALENESS_HASH = "relay:staleness";
 
+// --- token primitives ---
+
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+// Envelope mirrors the repo's signed-frame convention: base64url(payload)
+// "." base64url(HMAC-SHA256(payload, ADMIN_SECRET)), unpadded both halves.
+function issueAdminToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({ sub: "admin", iat: now, exp: now + ADMIN_TOKEN_TTL_SECONDS })
+  ).toString("base64url");
+  const sig = crypto.createHmac("sha256", ADMIN_SECRET).update(payload).digest("base64url");
+  return { token: `${payload}.${sig}`, expires_at: now + ADMIN_TOKEN_TTL_SECONDS };
+}
+
+function verifyAdminToken(token) {
+  if (!token || !ADMIN_SECRET) return false;
+  const parts = String(token).split(".");
+  if (parts.length !== 2) return false;
+  const [payload, sig] = parts;
+  const expected = crypto.createHmac("sha256", ADMIN_SECRET).update(payload).digest("base64url");
+  if (!safeEqual(expected, sig)) return false;
+  try {
+    const body = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return body.sub === "admin" && Number.isFinite(body.exp) && body.exp > Math.floor(Date.now() / 1000);
+  } catch {
+    return false;
+  }
+}
+
+function bearerFrom(req) {
+  const auth = req.headers["authorization"];
+  if (auth && /^Bearer\s+/i.test(auth)) return auth.slice(7).trim();
+  try {
+    return new URL(req.url, "http://localhost").searchParams.get("token") || "";
+  } catch {
+    return "";
+  }
+}
+
+// --- http plumbing ---
+
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "600");
 }
 
 function sendJson(res, code, body) {
@@ -52,9 +102,17 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
+  if (req.url === "/api/auth/token" && req.method === "POST") {
+    handleTokenIssue(req, res);
+    return;
+  }
   if (req.url === "/api/stats" && req.method === "GET") {
     if (!client.isOpen) {
       sendJson(res, 503, { status: "starting", message: "redis connecting" });
+      return;
+    }
+    if (!verifyAdminToken(bearerFrom(req))) {
+      sendJson(res, 401, { status: "error", message: "admin bearer token required" });
       return;
     }
     handleStats(res);
@@ -63,6 +121,34 @@ const server = http.createServer((req, res) => {
   res.writeHead(404);
   res.end("not found");
 });
+
+function handleTokenIssue(req, res) {
+  if (!ADMIN_SECRET) {
+    sendJson(res, 503, { status: "error", message: "admin tier not configured (ADMIN_SECRET unset)" });
+    return;
+  }
+  let body = "";
+  req.on("data", (d) => (body += d));
+  req.on("end", () => {
+    let secret = "";
+    try {
+      secret = String(JSON.parse(body).secret || "");
+    } catch {
+      secret = "";
+    }
+    if (!secret || !safeEqual(secret, ADMIN_SECRET)) {
+      sendJson(res, 401, { status: "error", message: "invalid admin secret" });
+      return;
+    }
+    const issued = issueAdminToken();
+    sendJson(res, 200, {
+      status: "ok",
+      token: issued.token,
+      expires_at: issued.expires_at,
+      expires_in: ADMIN_TOKEN_TTL_SECONDS,
+    });
+  });
+}
 
 async function handleStats(res) {
   try {
@@ -82,7 +168,9 @@ async function handleStats(res) {
     const channels = {};
     for (const ch of WS_CHANNELS) {
       const lastTs = Number(staleness[ch]) || 0;
-      channels[ch] = lastTs ? { last_seen_ms: lastTs, age_seconds: Math.max(0, Math.floor((now - lastTs) / 1000)) } : { last_seen_ms: null, age_seconds: null };
+      channels[ch] = lastTs
+        ? { last_seen_ms: lastTs, age_seconds: Math.max(0, Math.floor((now - lastTs) / 1000)) }
+        : { last_seen_ms: null, age_seconds: null };
     }
 
     const weights = model.weights
@@ -111,7 +199,10 @@ async function handleStats(res) {
         baseline_logloss: model.baseline_logloss !== undefined ? Number(model.baseline_logloss) : null,
         model_logloss: model.model_logloss !== undefined ? Number(model.model_logloss) : null,
         weights,
-        weight_names: (model.features ? JSON.parse(model.features) : []).map((name, i) => ({ name, weight: weights[i] ?? null })),
+        weight_names: (model.features ? JSON.parse(model.features) : []).map((name, i) => ({
+          name,
+          weight: weights[i] ?? null,
+        })),
       },
       pnl: {
         net: pnl.net !== undefined ? Number(pnl.net) : 0,
@@ -132,11 +223,32 @@ async function handleStats(res) {
   }
 }
 
-const wss = new WebSocketServer({ server, path: "/ws" });
+// --- websocket role tiering ---
 
-wss.on("connection", (socket) => {
-  console.log("client connected");
-  socket.on("close", () => console.log("client disconnected"));
+const wss = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  const pathname = (req.url || "").split("?")[0];
+  if (pathname !== "/ws") {
+    socket.destroy();
+    return;
+  }
+  let token = "";
+  try {
+    token = new URL(req.url, "http://localhost").searchParams.get("token") || "";
+  } catch {
+    token = "";
+  }
+  const role = token && verifyAdminToken(token) ? "admin" : "public";
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    ws.role = role;
+    wss.emit("connection", ws, req);
+  });
+});
+
+wss.on("connection", (socket, req) => {
+  console.log(`client connected (role=${socket.role})`);
+  socket.on("close", () => console.log(`client disconnected (role=${socket.role})`));
   socket.on("error", (err) => console.error("socket error:", err.message));
 });
 
@@ -169,10 +281,13 @@ async function main() {
         data: payload,
         ts: Date.now(),
       });
+
+      // Public sockets see ONLY the live match feed; admin sockets get the
+      // full bus (pnl, diagnostics, signed commands).
       for (const socket of wss.clients) {
-        if (socket.readyState === socket.OPEN) {
-          socket.send(framed);
-        }
+        if (socket.readyState !== socket.OPEN) continue;
+        if (socket.role !== "admin" && ch !== PUBLIC_CHANNEL) continue;
+        socket.send(framed);
       }
 
       // Operator stats ledger: count settled outcomes as they stream in,

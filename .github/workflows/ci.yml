@@ -61,6 +61,7 @@ jobs:
       - run: node --check server.js
       - run: npm ci
       - run: REDIS_URL=redis://localhost:6379/0 node test_stats.js
+      - run: REDIS_URL=redis://localhost:6379/0 node test_ws_roles.js
 
   frontend:
     name: web interface

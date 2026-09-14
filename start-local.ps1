@@ -71,7 +71,7 @@ Start-Sleep -Milliseconds 300
 
 $svc += Start-Svc -Name "relay" -File "node" -ArgsList @((Join-Path $root "web-interface-js\backend\server.js")) `
     -WorkDir (Join-Path $root "web-interface-js\backend") `
-    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PORT" = "8080" }
+    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PORT" = "8080"; "ADMIN_SECRET" = "local-admin-secret" }
 
 $svc += Start-Svc -Name "analytics" -File (Join-Path $root "analytics-engine-py\.venv\Scripts\python.exe") `
     -ArgsList @("src\main.py") -WorkDir (Join-Path $root "analytics-engine-py") `

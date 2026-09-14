@@ -1,13 +1,10 @@
 "use client";
 
 import LiveBetsGrid from "../components/LiveBetsGrid";
-import DiagnosticsLog from "../components/DiagnosticsLog";
-import ExecutionPanel from "../components/ExecutionPanel";
-import ModelAccuracyPanel from "../components/ModelAccuracyPanel";
 import useWebSockets from "../hooks/useWebSockets";
 
 export default function Page() {
-  const { connected, lastEvent, matches, diagnostics, pnl } = useWebSockets();
+  const { connected, lastEvent, matches } = useWebSockets();
 
   const marketCount = matches.reduce(
     (acc, m) => acc + Object.keys(m.markets || {}).length,
@@ -38,6 +35,19 @@ export default function Page() {
                 RX&nbsp;{lastSeen}
               </span>
             )}
+            <a
+              href="/admin"
+              className="pill mono"
+              style={{
+                color: "var(--text-3)",
+                textDecoration: "none",
+                border: "1px solid var(--hairline)",
+                padding: "4px 10px",
+                borderRadius: "8px",
+              }}
+            >
+              OPERATOR
+            </a>
           </div>
         </div>
       </nav>
@@ -51,14 +61,10 @@ export default function Page() {
           <div className="nav-meta">
             <span className="chip">{matches.length} matches</span>
             <span className="chip">{marketCount} markets</span>
-            <span className="chip">{diagnostics.length} audits</span>
           </div>
         </section>
 
         <LiveBetsGrid matches={matches} lastEvent={lastEvent} />
-        <ExecutionPanel pnl={pnl} />
-        <ModelAccuracyPanel />
-        <DiagnosticsLog entries={diagnostics} />
 
         <footer className="page-foot">
           <span>casuya-live · value-first trading</span>

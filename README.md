@@ -11,8 +11,8 @@ and runs an automated AI feedback loop to tune predictive parameters.
 | `data-ingestion-go` | Go | Streaming data consumer (WS/SSE) -> Redis | Railway Worker |
 | `analytics-engine-py` | Python | Study Room, filter engine, diagnostics, AI self-correction | Railway Worker |
 | `execution-engine-go` | Go | Signed command listener, direct bookmaker execution | Railway Worker (private mesh) |
-| `web-interface-js/backend` | Node.js | WebSocket relay from Redis pub/sub | Railway Web |
-| `web-interface-js/frontend` | Next.js/React | Live operational dashboard | Vercel |
+| `web-interface-js/backend` | Node.js | WebSocket relay from Redis pub/sub (public + admin tiers) | Railway Web |
+| `web-interface-js/frontend` | Next.js/React | Public live dashboard + `/admin` operator console | Vercel |
 | `mock-vendor` | Node.js | Local simulator: vendor WS feed + bookmaker WS (no external creds) | local only |
 
 ## Data flow
@@ -115,13 +115,40 @@ go test ./...   # in each data-ingestion-go / execution-engine-go (vet runs loca
 python tests/test_calibrate.py   # in analytics-engine-py (fit, metrics, gate)
 python tests/test_feature_study.py   # in analytics-engine-py (replay parity, monotonicity, windows)
 python tests/smoke_test.py   # in analytics-engine-py (end-to-end pipeline)
-REDIS_URL=redis://localhost:6379/0 node test_stats.js   # in web-interface-js/backend
+REDIS_URL=redis://localhost:6379/0 node test_stats.js   # in web-interface-js/backend (admin-tier API)
+REDIS_URL=redis://localhost:6379/0 node test_ws_roles.js   # in web-interface-js/backend (WS role tiering)
 npm run build --prefix web-interface-js/frontend
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same suite: Go build+vet+test, the
-Python calibrate/feature-study/smoke tests, the web-relay stats test against a
-Redis service container, and the frontend build.
+Python calibrate/feature-study/smoke tests, the web-relay stats + WS-role
+tests against a Redis service container, and the frontend build.
+
+## Admin tier (relay / admin dashboard)
+
+WebSocket/HTTP access to the relay is split into two tiers at the relay:
+
+- **Public** — `/ws` clients without a token only ever receive the live match
+  feed (`matches:live`). The operator data streams and the bankroll stats are
+  never routed to public sockets; the relay enforces this per-socket (it is not
+  a client-side convention).
+- **Admin** — clients that upgraded `/ws?token=<session>` also receive
+  `execution:pnl` settlements, `diagnostics:events` audits, and the
+  HMAC-signed `execution:commands` bus. `GET /api/stats` (calibration
+  weights/metrics, session bankroll, outcomes ledger, stream staleness)
+  requires the same bearer token.
+
+Session tokens are issued by `POST /api/auth/token` with the pre-shared
+`ADMIN_SECRET` (timing-safe compare). The token is a short-lived (8h)
+`base64url(payload) . HMAC-SHA256(payload, ADMIN_SECRET)` envelope mirroring the
+repo's signed-frame format. `ADMIN_SECRET` is set in `start-local.ps1`
+(`local-admin-secret` for local dev only — change it for real deployments).
+
+Frontend: the public dashboard at `/` (study room / live grid) is token-free.
+The operator console at `/admin` runs a login gate (`AdminLogin`), then mounts
+the Execution P&L, Model Accuracy, Execution Commands, and Diagnostics panels
+over an admin-upgraded WebSocket. Both Hooks refuse to connect without a valid
+session, and the session token clears on expiry or logout.
 
 ## Security notes
 
@@ -130,3 +157,8 @@ Redis service container, and the frontend build.
 - `INTERNAL_AUTH_SECRET` is `local-dev-secret` for local dev only; change it and
   `BOOKMAKER_API_KEY` for any real deployment.
 - The executor HTTP endpoint validates `X-Internal-Token` before touching the broker.
+- `execution:commands` is wired into the relay strictly as an admin channel:
+  public sockets are never offered it. `/api/stats` is 401 without a session
+  token and 503 when the admin tier is not configured.
+- Admin session tokens are bearer credentials scoped to the relay process;
+  persist only the 8h token in browser storage, never `ADMIN_SECRET` itself.

@@ -62,8 +62,12 @@ function Metric({ label, value, accent, hint }) {
  * Model accuracy + operator telemetry panel, fed by the relay's /api/stats.
  * Shows fit health (train/val, AUC, logloss vs baseline), adopted feature
  * weights, accumulated outcomes, and per-channel stream staleness.
+ *
+ * Accepts an optional `token` prop. When provided, every stats request is
+ * sent with the corresponding Authorization: Bearer header so the relay
+ * serves the full admin-tier response body.
  */
-export default function ModelAccuracyPanel() {
+export default function ModelAccuracyPanel({ token }) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const timerRef = useRef(null);
@@ -72,8 +76,14 @@ export default function ModelAccuracyPanel() {
     let disposed = false;
 
     async function poll() {
+      if (!token) {
+        if (!disposed) setError("no admin session");
+        return;
+      }
       try {
-        const res = await fetch(STATS_URL);
+        const res = await fetch(STATS_URL, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         if (!res.ok) throw new Error(`stats ${res.status}`);
         const body = await res.json();
         if (!disposed) {
@@ -91,7 +101,7 @@ export default function ModelAccuracyPanel() {
       disposed = true;
       clearInterval(timerRef.current);
     };
-  }, []);
+  }, [token]);
 
   const model = stats?.model;
   const staleSec = model?.status_age_seconds;
