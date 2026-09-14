@@ -6,13 +6,14 @@ const STORAGE_KEY = "casuya_admin_session";
 
 /**
  * Derive the relay HTTP API base from the WebSocket URL so one env var
- * configures both transports (ws://relay → http://relay, adds /ws path for
- * the WebSocket itself).
+ * configures both transports (ws://relay/ws → http://relay). The /ws path is
+ * the WebSocket upgrade route only; API routes sit at the origin root.
  */
 export function apiBase() {
   try {
     const parsed = new URL(WS_URL.includes("://") ? WS_URL : `wss://${WS_URL}`);
     parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+    parsed.pathname = "/";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString().replace(/\/$/, "");

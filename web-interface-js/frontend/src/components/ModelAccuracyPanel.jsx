@@ -1,25 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-const WS_URL =
-  process.env.NEXT_PUBLIC_WS_BACKEND_URL || "ws://localhost:8080";
-
-/**
- * Derive the stats API base from the relay WebSocket URL so one env var
- * configures both transports (ws://relay → http://relay/api/stats).
- */
-function apiBase() {
-  try {
-    const parsed = new URL(WS_URL.includes("://") ? WS_URL : `wss://${WS_URL}`);
-    parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString().replace(/\/$/, "");
-  } catch {
-    return "http://localhost:8080";
-  }
-}
+import { apiBase } from "../lib/session";
 
 const STATS_URL = `${apiBase()}/api/stats`;
 
