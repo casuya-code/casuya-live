@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/casuya-live/data-ingestion/internal/apifootball"
+	"github.com/casuya-live/data-ingestion/internal/betpawa"
 	"github.com/casuya-live/data-ingestion/internal/cache"
 	"github.com/casuya-live/data-ingestion/internal/helabet"
 	"github.com/casuya-live/data-ingestion/internal/stream"
@@ -72,6 +73,23 @@ func main() {
 		log.Printf("starting Helabet live poller (interval %s)", interval)
 		if err := poller.Run(ctx, redis.PublishMatch); err != nil && ctx.Err() == nil {
 			log.Fatalf("helabet poller exited: %v", err)
+		}
+	case "betpawa":
+		// pawablox / Zola sportsbook JSON gateway — the book's own live odds.
+		interval := 5 * time.Second
+		if v := os.Getenv("BETPAWA_POLL_SECONDS"); v != "" {
+			if n, err := time.ParseDuration(v + "s"); err == nil && n > 0 {
+				interval = n
+			}
+		}
+		poller := betpawa.New(betpawa.Config{
+			BaseURL:  envOr("BETPAWA_BASE_URL", "https://www.betpawa.co.tz"),
+			Brand:    envOr("BETPAWA_BRAND", "betpawa-tanzania"),
+			Interval: interval,
+		})
+		log.Printf("starting betPawa live poller (interval %s)", interval)
+		if err := poller.Run(ctx, redis.PublishMatch); err != nil && ctx.Err() == nil {
+			log.Fatalf("betpawa poller exited: %v", err)
 		}
 	default:
 		if os.Getenv(envProviderURL) == "" {

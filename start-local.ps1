@@ -102,6 +102,9 @@ if ($env:PROVIDER_MODE) { $ingestorEnv["PROVIDER_MODE"] = $env:PROVIDER_MODE }
 if ($env:APIFOOTBALL_KEY) { $ingestorEnv["APIFOOTBALL_KEY"] = $env:APIFOOTBALL_KEY }
 if ($env:HELABET_BASE_URL) { $ingestorEnv["HELABET_BASE_URL"] = $env:HELABET_BASE_URL }
 if ($env:HELABET_POLL_SECONDS) { $ingestorEnv["HELABET_POLL_SECONDS"] = $env:HELABET_POLL_SECONDS }
+if ($env:BETPAWA_BASE_URL) { $ingestorEnv["BETPAWA_BASE_URL"] = $env:BETPAWA_BASE_URL }
+if ($env:BETPAWA_BRAND) { $ingestorEnv["BETPAWA_BRAND"] = $env:BETPAWA_BRAND }
+if ($env:BETPAWA_POLL_SECONDS) { $ingestorEnv["BETPAWA_POLL_SECONDS"] = $env:BETPAWA_POLL_SECONDS }
 $svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") -Env $ingestorEnv
 
 $svc += Start-Svc -Name "executor" -File (Join-Path $bin "executor.exe") -WorkDir (Join-Path $root "execution-engine-go") `

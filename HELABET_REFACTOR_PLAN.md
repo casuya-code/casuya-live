@@ -550,6 +550,16 @@ Phase 4B (AUTOMATED SETTLEMENT VERIFY — NEXT ⏳)
   ├── Recon Helabet results per-match endpoint (games route 405 for now)
   ├── Full-time idempotent grading vs feed drop-off
   └── Operator auto-close on verified results
+
+Phase 4C (BETPAWA DIRECT FEED — DONE ✅, DEPLOYED)
+  ├── betPawa/pawablox sportsbook JSON gateway recon
+  ├── get live events: GET /api/sportsbook/v4/events/lists/by-queries?q=<json>
+  ├── Headers: x-pawa-brand=betpawa-tanzania, x-pawa-language=en, devicetype=web
+  ├── markets[0] type 3743 = 1X2-FT → prices[0/1/2].odds = home/draw/away
+  ├── score in participantPeriodResults, FT via currentPeriod.slug FULL_TIME_EXCLUDING_OVERTIME
+  ├── Football-only gate + clock parsing + drop-off settlement
+  ├── Deployed as second ingestor instance: ingestor-betpawa (PROVIDER_MODE=betpawa)
+  └── /signals/active showing both hb-* and bp-* frames in parallel
 ```
 
 ---
@@ -562,9 +572,14 @@ All phases deploy to the same Railway project (`casuya-live`). Environment varia
 # Mock mode (fallback local/dev)
 PROVIDER_MODE=mock PROVIDER_WS_URL=ws://mock-vendor:19999/vendor PAPER_TRADE=true
 
-# REAL DATA (current production) — the book's own live feed
+# REAL DATA (current production) — both books in parallel
+# Ingestor service 1: Helabet EveryMatrix feed
 PROVIDER_MODE=helabet PAPER_TRADE=true
 #   + optional HELABET_BASE_URL / HELABET_POLL_SECONDS
+
+# Ingestor service 2: betPawa pawablox sportsbook gateway
+PROVIDER_MODE=betpawa PAPER_TRADE=true
+#   + optional BETPAWA_BASE_URL / BETPAWA_BRAND / BETPAWA_POLL_SECONDS
 
 # API-Football fallback (requires approved key — user action pending)
 PROVIDER_MODE=apifootball APIFOOTBALL_KEY=xxxxx PAPER_TRADE=true
@@ -596,4 +611,7 @@ PAPER_TRADE=false BROKER_MODE=helabet HELABET_COOKIE=... HELABET_USER_AGENT=...
 - [x] Phase 4: Helabet direct live feed built, unit-tested, wired into PROVIDER_MODE=helabet
 - [x] Phase 4: Real odds flowing from provider — production /signals showing real Helabet fixtures (verified 9/15/2026)
 - [x] Phase 4: Football-only gate + MarketID fix (cricket/no-market frames dropped)
+- [x] Phase 4C: betPawa pawablox sportsbook JSON gateway recon (x-pawa-brand header, events/lists/by-queries)
+- [x] Phase 4C: betPawa provider built, unit-tested, deployed as second ingestor (ingestor-betpawa)
+- [x] Phase 4C: /signals/active showing both Helabet and betPawa frames in parallel (verified 9/15/2026)
 - [ ] Phase 4B: Helabet results-feed mapping for fully automated settlement verification
