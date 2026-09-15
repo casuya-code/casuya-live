@@ -12,6 +12,10 @@ const (
 	Market2H1X2 = "2H_1X2"
 	MarketCS1H  = "CS_1H"
 	MarketCS2H  = "CS_2H"
+	// MarketFT1X2 is the real-vendor full-time 1X2 frame used by the
+	// API-Football provider. Mock frames keep the legacy half/correct-score
+	// markets above.
+	MarketFT1X2 = "FULLTIME_1X2"
 )
 
 // TeamSide disambiguates the two competing sides.

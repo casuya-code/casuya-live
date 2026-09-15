@@ -12,6 +12,7 @@ type Fill struct {
 	Side    string
 	Odds    float64
 	Stake   float64
+	MatchID string
 	Cycle   int64
 	FillAt  time.Time
 }

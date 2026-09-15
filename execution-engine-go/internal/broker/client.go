@@ -97,24 +97,34 @@ func (b *Broker) Run(ctx context.Context) error {
 	}
 }
 
-func (b *Broker) dispatch(ctx context.Context, payload *executionPayload) error {
-	if payload.Amount <= 0 {
-		return fmt.Errorf("stake must be positive")
+// PlaceOrder satisfies the OrderPlacer interface for live WebSocket execution.
+func (b *Broker) PlaceOrder(ctx context.Context, marketID string, side string, odds float64, stake float64) (*Fill, error) {
+	if stake <= 0 {
+		return nil, fmt.Errorf("stake must be positive")
 	}
 	conn, _, err := b.dialer.DialContext(ctx, b.cfg.BookmakerWS, nil)
 	if err != nil {
-		return fmt.Errorf("bookmaker dial: %w", err)
+		return nil, fmt.Errorf("bookmaker dial: %w", err)
 	}
 	defer conn.Close()
 	if err := b.authHandshake(ctx, conn); err != nil {
-		return fmt.Errorf("auth handshake: %w", err)
+		return nil, fmt.Errorf("auth handshake: %w", err)
 	}
-	fill, err := b.placeOrder(ctx, conn, payload)
+	fill, err := b.placeOrder(ctx, conn, &executionPayload{
+		MarketID: marketID,
+		Side:     side,
+		Odds:     odds,
+		Amount:   stake,
+	})
 	if err != nil {
-		return fmt.Errorf("order placement: %w", err)
+		return nil, fmt.Errorf("order placement: %w", err)
 	}
 	b.recordFill(fill)
-	return nil
+	return fill, nil
+}
+
+func (b *Broker) dispatch(ctx context.Context, payload *executionPayload) (*Fill, error) {
+	return b.PlaceOrder(ctx, payload.MarketID, payload.Side, payload.Odds, payload.Amount)
 }
 
 // recordFill stores a confirmed order so it can be graded at settlement.
@@ -320,12 +330,23 @@ func (b *Broker) AuthSecret() string {
 
 // ExecuteEnvelope verifies a signed envelope and routes it to the bookmaker.
 // Shared by both the Redis pub/sub listener and the authenticated HTTP entry.
+// After a successful fill it broadcasts a live signal for operator dashboards.
 func (b *Broker) ExecuteEnvelope(ctx context.Context, raw string) error {
 	payload, err := decodeEnvelope(raw, b.cfg.AuthSecret)
 	if err != nil {
 		return fmt.Errorf("verify envelope: %w", err)
 	}
-	return b.dispatch(ctx, payload)
+	fill, err := b.dispatch(ctx, payload)
+	if err != nil {
+		return err
+	}
+	if fill != nil && fill.MatchID == "" {
+		fill.MatchID = payload.MatchID
+	}
+	if fill != nil {
+		publishSignal(ctx, b.rdb, fill, payload.Odds, payload.TrueProb, payload.Implied)
+	}
+	return nil
 }
 
 func sign(body []byte, secret string) string {
@@ -354,8 +375,10 @@ func decodeEnvelope(raw string, secret string) (*executionPayload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("base64 decode: %w", err)
 	}
-	if err := verifyHMAC(bodyBytes, parts[1], secret); err != nil {
-		return nil, fmt.Errorf("signature: %w", err)
+	if secret != "" {
+		if err := verifyHMAC(bodyBytes, parts[1], secret); err != nil {
+			return nil, fmt.Errorf("signature: %w", err)
+		}
 	}
 	var p executionPayload
 	if err := json.Unmarshal(bodyBytes, &p); err != nil {

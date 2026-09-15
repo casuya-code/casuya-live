@@ -86,6 +86,19 @@ function Nav({ onLogout, authed }) {
         </div>
         <div className="nav-meta">
           <a
+            href="/signals"
+            className="pill mono"
+            style={{
+              color: "var(--text-3)",
+              textDecoration: "none",
+              border: "1px solid var(--hairline)",
+              padding: "4px 10px",
+              borderRadius: "8px",
+            }}
+          >
+            SIGNALS
+          </a>
+          <a
             href="/"
             className="pill mono"
             style={{

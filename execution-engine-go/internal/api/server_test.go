@@ -20,8 +20,10 @@ func (s *stubBroker) ExecuteEnvelope(_ context.Context, raw string) error {
 	return s.err
 }
 
+func (s *stubBroker) AuthSecret() string { return "" }
+
 func newTestServer(b *stubBroker, token string) *httptest.Server {
-	h := New(b, "127.0.0.1:0", token)
+	h := New(b, "127.0.0.1:0", token, nil)
 	return httptest.NewServer(h.server.Handler)
 }
 
@@ -135,5 +137,96 @@ func TestHealthz(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestActiveSignalsUnavailableWithoutRedis(t *testing.T) {
+	b := &stubBroker{}
+	srv := newTestServer(b, "secret")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/signals/active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without redis, got %d", resp.StatusCode)
+	}
+}
+
+func TestAnalyticsPnLUnavailableWithoutRedis(t *testing.T) {
+	b := &stubBroker{}
+	srv := newTestServer(b, "secret")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/analytics/pnl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without redis, got %d", resp.StatusCode)
+	}
+}
+
+func TestStreamSignalsUnavailableWithoutRedis(t *testing.T) {
+	b := &stubBroker{}
+	srv := newTestServer(b, "secret")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/stream/signals")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without redis, got %d", resp.StatusCode)
+	}
+}
+
+func TestOperatorPlaceUnavailableWithoutRedis(t *testing.T) {
+	b := &stubBroker{}
+	srv := newTestServer(b, "secret")
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/v1/operator/place", "application/json",
+		strings.NewReader(`{"order_id":"o1","status":"placed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without redis, got %d", resp.StatusCode)
+	}
+}
+
+func TestOperatorPlaceRejectsGet(t *testing.T) {
+	b := &stubBroker{}
+	srv := newTestServer(b, "secret")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/operator/place")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET, got %d", resp.StatusCode)
+	}
+}
+
+func TestOperatorPlacementsUnavailableWithoutRedis(t *testing.T) {
+	b := &stubBroker{}
+	srv := newTestServer(b, "secret")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/operator/placements")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without redis, got %d", resp.StatusCode)
 	}
 }

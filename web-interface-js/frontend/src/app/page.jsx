@@ -36,6 +36,19 @@ export default function Page() {
               </span>
             )}
             <a
+              href="/signals"
+              className="pill mono"
+              style={{
+                color: "var(--text-3)",
+                textDecoration: "none",
+                border: "1px solid var(--hairline)",
+                padding: "4px 10px",
+                borderRadius: "8px",
+              }}
+            >
+              SIGNALS
+            </a>
+            <a
               href="/admin"
               className="pill mono"
               style={{

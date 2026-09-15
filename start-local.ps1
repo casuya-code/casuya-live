@@ -21,6 +21,12 @@ function Start-Svc {
     foreach ($k in $Env.Keys) {
         [System.Environment]::SetEnvironmentVariable($k, [string]$Env[$k], "Process")
     }
+    # PORT set by an earlier service (e.g. relay PORT=8080) leaks into later
+    # launches via the shared process environment; clear it unless the service
+    # declares its own so services with no PORT fall back to their own defaults.
+    if (-not $Env.ContainsKey("PORT")) {
+        [System.Environment]::SetEnvironmentVariable("PORT", "", "Process")
+    }
     $out = Join-Path $logs "$Name.out.log"
     $err = Join-Path $logs "$Name.err.log"
     # PowerShell 5.1 rejects BOTH an empty and a null -ArgumentList; omit the
@@ -81,7 +87,7 @@ Start-Sleep -Milliseconds 300
 
 $svc += Start-Svc -Name "relay" -File "node" -ArgsList @((Join-Path $root "web-interface-js\backend\server.js")) `
     -WorkDir (Join-Path $root "web-interface-js\backend") `
-    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PORT" = "8080"; "ADMIN_SECRET" = "local-admin-secret" }
+    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PORT" = "8082"; "ADMIN_SECRET" = "local-admin-secret" }
 
 $svc += Start-Svc -Name "analytics" -File (Join-Path $root "analytics-engine-py\.venv\Scripts\python.exe") `
     -ArgsList @("src\main.py") -WorkDir (Join-Path $root "analytics-engine-py") `
@@ -91,21 +97,25 @@ $svc += Start-Svc -Name "mock" -File "node" -ArgsList @((Join-Path $root "mock-v
     -WorkDir (Join-Path $root "mock-vendor") `
     -Env @{ "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "MOCK_VENDOR_PORT" = "19999"; "MOCK_TRADE_PORT" = "19998"; "REDIS_URL" = "redis://localhost:6379/0" }
 
-$svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") `
-    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_WS_URL" = "ws://localhost:19999/vendor" }
+$ingestorEnv = @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_WS_URL" = "ws://localhost:19999/vendor" }
+if ($env:PROVIDER_MODE) { $ingestorEnv["PROVIDER_MODE"] = $env:PROVIDER_MODE }
+if ($env:APIFOOTBALL_KEY) { $ingestorEnv["APIFOOTBALL_KEY"] = $env:APIFOOTBALL_KEY }
+if ($env:HELABET_BASE_URL) { $ingestorEnv["HELABET_BASE_URL"] = $env:HELABET_BASE_URL }
+if ($env:HELABET_POLL_SECONDS) { $ingestorEnv["HELABET_POLL_SECONDS"] = $env:HELABET_POLL_SECONDS }
+$svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") -Env $ingestorEnv
 
 $svc += Start-Svc -Name "executor" -File (Join-Path $bin "executor.exe") -WorkDir (Join-Path $root "execution-engine-go") `
     -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "BOOKMAKER_WS_URL" = "ws://localhost:19998/trade"; "BOOKMAKER_API_KEY" = "local-test-key"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "PORT" = "8081" }
 
 $svc += Start-Svc -Name "frontend" -File "npm.cmd" -ArgsList @("run","dev") `
     -WorkDir (Join-Path $root "web-interface-js\frontend") `
-    -Env @{ "NEXT_PUBLIC_WS_BACKEND_URL" = "ws://localhost:8080/ws"; "PORT" = "3000" }
+    -Env @{ "NEXT_PUBLIC_WS_BACKEND_URL" = "ws://localhost:8082/ws"; "PORT" = "3000" }
 
 Write-Host ""
 Write-Host "Health checks:" -ForegroundColor Cyan
 
 $checks = @(
-    @{ Name = "relay    "; Url = "http://localhost:8080/healthz" },
+    @{ Name = "relay    "; Url = "http://localhost:8082/healthz" },
     @{ Name = "executor "; Url = "http://localhost:8081/" },
     @{ Name = "dashboard"; Url = "http://localhost:3000" }
 )

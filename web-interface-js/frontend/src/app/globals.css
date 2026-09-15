@@ -1,13 +1,13 @@
 :root {
   --bg: #060a13;
-  --bg-elev: #0a101f;
-  --surface: #0d1526;
-  --surface-2: #121d33;
-  --hairline: rgba(148, 163, 184, 0.14);
-  --hairline-strong: rgba(148, 163, 184, 0.3);
-  --text: #e6edf6;
-  --text-2: #9fb0c7;
-  --text-3: #5d6f8a;
+  --bg-elev: #0b1220;
+  --surface: #0f1929;
+  --surface-2: #16233c;
+  --hairline: rgba(148, 163, 184, 0.22);
+  --hairline-strong: rgba(148, 163, 184, 0.42);
+  --text: #f2f6fc;
+  --text-2: #bccadd;
+  --text-3: #8ea2c0;
   --accent: #38bdf8;
   --accent-2: #2dd4bf;
   --accent-3: #a5b4fc;
@@ -210,20 +210,16 @@ body::before {
 /* --- cards --- */
 .card {
   position: relative;
-  border: 1px solid transparent;
+  border: 1px solid var(--hairline-strong);
   border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, var(--surface), var(--bg-elev)) padding-box,
-    linear-gradient(160deg, rgba(148, 163, 184, 0.22), rgba(148, 163, 184, 0.05) 40%, rgba(148, 163, 184, 0.1)) border-box;
+  background: linear-gradient(180deg, var(--surface), var(--bg-elev));
   box-shadow: var(--shadow-card);
 }
 
 .card--lift:hover {
   transform: translateY(-2px);
-  border-color: transparent;
-  background:
-    linear-gradient(180deg, var(--surface-2), var(--bg-elev)) padding-box,
-    linear-gradient(160deg, rgba(56, 189, 248, 0.5), rgba(45, 212, 191, 0.16) 45%, rgba(165, 180, 252, 0.3)) border-box;
+  border-color: rgba(56, 189, 248, 0.5);
+  background: linear-gradient(180deg, var(--surface-2), var(--bg-elev));
   box-shadow: var(--shadow-card), 0 20px 46px -24px rgba(56, 189, 248, 0.35);
   transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
@@ -516,7 +512,7 @@ body::before {
   border-radius: var(--radius);
   padding: 28px 20px;
   text-align: center;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 13px;
 }
 

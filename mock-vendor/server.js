@@ -3,9 +3,20 @@
 const path = require("path");
 const crypto = require("crypto");
 
-const { WebSocketServer } = require(
-  path.join(__dirname, "..", "web-interface-js", "backend", "node_modules", "ws")
-);
+// Standalone deployments install ws/redis as deps; the local monorepo layout
+// keeps them under web-interface-js/backend/node_modules. Prefer the former,
+// fall back to the latter so both Railway and start-local.ps1 work unchanged.
+function load(name) {
+  try {
+    return require(name);
+  } catch {
+    return require(path.join(
+      __dirname, "..", "web-interface-js", "backend", "node_modules", name
+    ));
+  }
+}
+
+const { WebSocketServer } = load("ws");
 
 const AUTH_SECRET = process.env.INTERNAL_AUTH_SECRET || "local-dev-secret";
 const VENDOR_PORT = parseInt(process.env.MOCK_VENDOR_PORT || "19999", 10);
@@ -29,9 +40,7 @@ let orderSeq = 0;
 function redisPublisher() {
   let client = null;
   try {
-    const redis = require(path.join(
-      __dirname, "..", "web-interface-js", "backend", "node_modules", "redis"
-    ));
+    const redis = load("redis");
     client = redis.createClient({ url: REDIS_URL });
     client.on("error", () => {});
     client.connect().then(
@@ -178,9 +187,7 @@ function pickScenario() {
   return "away";
 }
 
-function vendorServer() {
-  const wss = new WebSocketServer({ port: VENDOR_PORT, path: "/vendor" });
-  console.log(`[mock-vendor] live feed   ws://localhost:${VENDOR_PORT}/vendor`);
+function vendorServer(wss) {
   wss.on("connection", (socket) => {
     console.log("[mock-vendor] ingestor connected");
     const kickoff = Math.floor(Date.now() / 1000) - 31 * 60;
@@ -206,7 +213,6 @@ function vendorServer() {
     }, 2500);
     socket.on("close", () => clearInterval(timer));
   });
-  return wss;
 }
 
 function verifySig(sig, body, secret) {
@@ -219,9 +225,7 @@ function verifySig(sig, body, secret) {
   }
 }
 
-function tradeServer() {
-  const wss = new WebSocketServer({ port: TRADE_PORT, path: "/trade" });
-  console.log(`[mock-vendor] bookmaker   ws://localhost:${TRADE_PORT}/trade`);
+function tradeServer(wss) {
   wss.on("connection", (socket) => {
     console.log("[mock-vendor] executor connected");
     socket.on("message", (raw) => {
@@ -288,10 +292,62 @@ function tradeServer() {
       socket.send(JSON.stringify({ status: "error", body: "unknown frame" }));
     });
   });
-  return wss;
 }
 
-vendorServer();
-tradeServer();
+// --- listeners -------------------------------------------------------------
+// Production (Railway) injects a single PORT: serve both WS paths from one
+// HTTP server. Local dev keeps the two historical ports (VENDOR/TRADE).
+
+const vendor = new WebSocketServer({ noServer: true });
+vendorServer(vendor);
+const trade = new WebSocketServer({ noServer: true });
+tradeServer(trade);
+
+function handleVendor(req, socket, head) {
+  vendor.handleUpgrade(req, socket, head, (ws) => vendor.emit("connection", ws, req));
+}
+function handleTrade(req, socket, head) {
+  trade.handleUpgrade(req, socket, head, (ws) => trade.emit("connection", ws, req));
+}
+function route(req, socket, head) {
+  const p = (req.url || "").split("?")[0];
+  if (p === "/vendor") handleVendor(req, socket, head);
+  else if (p === "/trade") handleTrade(req, socket, head);
+  else socket.destroy();
+}
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 0;
+if (PORT) {
+  const server = require("http").createServer();
+  server.on("upgrade", route);
+  server.listen(PORT, () => {
+    console.log(`[mock-vendor] live feed   ws://localhost:${PORT}/vendor`);
+    console.log(`[mock-vendor] bookmaker   ws://localhost:${PORT}/trade`);
+  });
+} else {
+  const http = require("http");
+  const vendorHttp = http.createServer((req, res) => {
+    res.writeHead(404);
+    res.end("not found");
+  });
+  vendorHttp.on("upgrade", (req, socket, head) => {
+    if ((req.url || "").split("?")[0] !== "/vendor") { socket.destroy(); return; }
+    handleVendor(req, socket, head);
+  });
+  vendorHttp.listen(VENDOR_PORT, () => {
+    console.log(`[mock-vendor] live feed   ws://localhost:${VENDOR_PORT}/vendor`);
+  });
+  const tradeHttp = http.createServer((req, res) => {
+    res.writeHead(404);
+    res.end("not found");
+  });
+  tradeHttp.on("upgrade", (req, socket, head) => {
+    if ((req.url || "").split("?")[0] !== "/trade") { socket.destroy(); return; }
+    handleTrade(req, socket, head);
+  });
+  tradeHttp.listen(TRADE_PORT, () => {
+    console.log(`[mock-vendor] bookmaker   ws://localhost:${TRADE_PORT}/trade`);
+  });
+}
 
 process.on("SIGTERM", () => process.exit(0));
