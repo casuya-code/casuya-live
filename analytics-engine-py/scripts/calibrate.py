@@ -638,8 +638,11 @@ def main() -> None:
     if len(X) < 20:
         print("insufficient rows; skipping the fit (no weights written)")
         _publish_model_hash("insufficient", args.redis_url)
-        write_decay_matrix()
-        write_season_trends(cycles)
+        try:
+            write_decay_matrix()
+            write_season_trends(cycles)
+        except OSError as exc:
+            print(f"decay/trends write skipped: {exc}")
         if args.update_distributions:
             dists = recompute_distributions(frames)
             DISTS_PATH.write_text(json.dumps(dists, indent=2, sort_keys=True), encoding="utf-8")
@@ -674,22 +677,25 @@ def main() -> None:
         val_ll=val_ll,
         base_ll=base_ll,
     )
-    append_timeseries(
-        status="adopted" if adopt else "refused",
-        rows=len(X),
-        cycles=report["cycles"],
-        frames=report["frames"],
-        l2=args.l2,
-        bias=bias,
-        weights=weights,
-        train_acc=train_acc,
-        train_brier=train_brier,
-        val_acc=val_acc,
-        val_brier=val_brier,
-        val_auc=val_auc_val,
-        base_ll=base_ll,
-        model_ll=val_ll,
-    )
+    try:
+        append_timeseries(
+            status="adopted" if adopt else "refused",
+            rows=len(X),
+            cycles=report["cycles"],
+            frames=report["frames"],
+            l2=args.l2,
+            bias=bias,
+            weights=weights,
+            train_acc=train_acc,
+            train_brier=train_brier,
+            val_acc=val_acc,
+            val_brier=val_brier,
+            val_auc=val_auc_val,
+            base_ll=base_ll,
+            model_ll=val_ll,
+        )
+    except OSError as exc:
+        print(f"timeseries append skipped: {exc}")
 
     if not adopt:
         print(
@@ -739,13 +745,19 @@ def main() -> None:
             },
         )
 
-    write_decay_matrix()
-    write_season_trends(cycles)
+    try:
+        write_decay_matrix()
+        write_season_trends(cycles)
+    except OSError as exc:
+        print(f"decay/trends write skipped: {exc}")
 
     if args.update_distributions:
-        dists = recompute_distributions(frames)
-        DISTS_PATH.write_text(json.dumps(dists, indent=2, sort_keys=True), encoding="utf-8")
-        print(f"wrote {DISTS_PATH} with leagues: {', '.join(dists['leagues']) if dists['leagues'] else '(none)'}")
+        try:
+            dists = recompute_distributions(frames)
+            DISTS_PATH.write_text(json.dumps(dists, indent=2, sort_keys=True), encoding="utf-8")
+            print(f"wrote {DISTS_PATH} with leagues: {', '.join(dists['leagues']) if dists['leagues'] else '(none)'}")
+        except OSError as exc:
+            print(f"distributions write skipped: {exc}")
 
 
 if __name__ == "__main__":
