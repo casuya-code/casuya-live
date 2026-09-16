@@ -721,10 +721,16 @@ def main() -> None:
             "baseline_logloss": round(base_ll, 4),
             "model_logloss": round(val_ll, 4),
         }
-        WEIGHTS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        print(f"wrote {WEIGHTS_PATH}")
         # Machine-readable line for one-shot containers / log capture.
-        print(f"CALIB_JSON={json.dumps(payload, sort_keys=True)}")
+        payload_compact = json.dumps(payload, sort_keys=True)
+        try:
+            WEIGHTS_PATH.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            print(f"wrote {WEIGHTS_PATH}")
+        except OSError as exc:
+            print(f"weights write skipped: {exc}")
+        print(f"CALIB_JSON={payload_compact}")
         _publish_model_hash(
             "adopted",
             args.redis_url,
