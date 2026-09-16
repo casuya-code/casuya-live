@@ -2,6 +2,7 @@ package betpawa
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -177,8 +178,10 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 
 func TestRunDropsEarlyMatchNoFullTime(t *testing.T) {
 	// A match that drops while still in the FIRST half must NOT emit FULLTIME
-	// — its score cannot be treated as final.
-	body := `{"responses":[{"responses":[{"id":"502","name":"A-B","startTime":"2026-09-15T12:00:00Z","results":{"display":{"minute":"40","currentPeriod":{"slug":"FIRST_HALF"}},"participantPeriodResults":[{"participant":{"type":"HOME"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"","type":"SCORE"}]},{"participant":{"type":"AWAY"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"","type":"SCORE"}]}]},"participants":[{"name":"A","position":1},{"name":"B","position":2}],"markets":[{"marketType":{"id":"3743"},"row":[{"prices":[{"name":"1","odds":2.0},{"name":"X","odds":3.0},{"name":"2","odds":8.0}]}]}],"category":{"id":"2","name":"Football"},"region":{"id":"1","name":"K"},"competition":{"id":"1","name":"P"}}]}]}`
+	// — its score cannot be treated as final. Kickoff is recent (10 min ago) so
+	// the kickoff-age fallback must NOT fire.
+	recent := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)
+	body := fmt.Sprintf(`{"responses":[{"responses":[{"id":"502","name":"A-B","startTime":"%s","results":{"display":{"minute":"40","currentPeriod":{"slug":"FIRST_HALF"}},"participantPeriodResults":[{"participant":{"type":"HOME"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"","type":"SCORE"}]},{"participant":{"type":"AWAY"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"","type":"SCORE"}]}]},"participants":[{"name":"A","position":1},{"name":"B","position":2}],"markets":[{"marketType":{"id":"3743"},"row":[{"prices":[{"name":"1","odds":2.0},{"name":"X","odds":3.0},{"name":"2","odds":8.0}]}]}],"category":{"id":"2","name":"Football"},"region":{"id":"1","name":"K"},"competition":{"id":"1","name":"P"}}]}]}`, recent)
 	call := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call++

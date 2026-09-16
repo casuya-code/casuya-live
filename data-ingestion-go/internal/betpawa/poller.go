@@ -129,7 +129,7 @@ func (p *Poller) tick(ctx context.Context) error {
 
 	for id, trk := range p.active {
 		if !nowSeen[id] {
-			if !trk.ftEmitted && clockIsLate(trk.match.Clock) {
+			if !trk.ftEmitted && (clockIsLate(trk.match.Clock) || (!trk.match.Kickoff.IsZero() && time.Since(trk.match.Kickoff) > 90*time.Minute)) {
 				ft := trk.match
 				ft.Clock = "FULLTIME"
 				ft.ReceivedAt = time.Now().UTC()

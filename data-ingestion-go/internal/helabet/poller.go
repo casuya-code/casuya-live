@@ -179,7 +179,13 @@ func (p *Poller) tick(ctx context.Context) {
 	p.mu.Unlock()
 
 	for id, tm := range dropped {
-		if tm != nil && (IsFullTime(tm.raw) || clockLateForDrop(tm.raw)) {
+		// Emit FULLTIME if: the feed explicitly marked FT, the clock is
+		// late (85'+), or the match is old enough from kickoff (90+ min)
+		// that it must be finished even though the feed clock is frozen.
+		finished := tm != nil && (IsFullTime(tm.raw) ||
+			clockLateForDrop(tm.raw) ||
+			(tm.raw != nil && tm.raw.StartTs > 0 && time.Since(time.Unix(tm.raw.StartTs, 0)) > 90*time.Minute))
+		if finished {
 			ft := tm.lastFrame
 			ft.Clock = "FULLTIME"
 			ft.ReceivedAt = time.Now().UTC()
