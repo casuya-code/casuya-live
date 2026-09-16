@@ -130,7 +130,9 @@ func TestFetchLiveRejectsNon200(t *testing.T) {
 }
 
 func TestRunSettlesDroppedMatch(t *testing.T) {
-	// Server returns one match; on second tick returns empty → match dropped → FT settle
+	// Server returns one match; on second tick returns empty → match dropped.
+	// The poller must NOT fabricate a FULLTIME frame from a frozen live frame;
+	// only a feed-confirmed FINISHED/FULL_TIME period gets one.
 	call := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call++
@@ -158,13 +160,53 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	ftFrames := 0
 	for _, f := range frames {
 		if f.MatchID == "bp-500" && f.Clock == "FULLTIME" {
-			ftFrames++
+			t.Fatalf("dropped match must not emit fabricated FULLTIME, got frame %+v", f)
 		}
 	}
-	if ftFrames != 1 {
-		t.Fatalf("expected exactly 1 FULLTIME frame for bp-500, got %d; frames=%+v", ftFrames, frames)
+}
+
+func TestRunConfirmedFullTimeEmitsOnce(t *testing.T) {
+	// A feed that explicitly confirms FULL_TIME must emit exactly one FULLTIME
+	// frame even if repeated on later ticks (ftEmitted guard).
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		w.Write([]byte(`{"responses":[{"responses":[{"id":"501","name":"X-Y","startTime":"2026-09-15T12:00:00Z","results":{"display":{"minute":"","currentPeriod":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"}},"participantPeriodResults":[{"participant":{"type":"HOME"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"2","type":"SCORE"}]},{"participant":{"type":"AWAY"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"1","type":"SCORE"}]}]},"participants":[{"name":"X","position":1},{"name":"Y","position":2}],"markets":[{"marketType":{"id":"3743"},"row":[{"prices":[{"name":"1","odds":2.0},{"name":"X","odds":3.0},{"name":"2","odds":8.0}]}]}],"category":{"id":"2","name":"Football"},"region":{"id":"1","name":"K"},"competition":{"id":"1","name":"P"}}]}]}`))
+	}))
+	defer srv.Close()
+
+	p := New(Config{BaseURL: srv.URL, Interval: 40 * time.Millisecond, Take: 5})
+	var mu sync.Mutex
+	var frames []stream.Match
+	publish := func(_ context.Context, m stream.Match) error {
+		mu.Lock()
+		defer mu.Unlock()
+		frames = append(frames, m)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx, publish)
+
+	mu.Lock()
+	defer mu.Unlock()
+	seen := 0
+	for _, f := range frames {
+		if f.MatchID != "bp-501" {
+			continue
+		}
+		if f.Clock != "FULLTIME" {
+			t.Fatalf("feed-confirmed FT frame must carry Clock=FULLTIME, got %+v", f)
+		}
+		if f.Score.Home != 2 || f.Score.Away != 1 {
+			t.Fatalf("FT score = %d-%d, want 2-1", f.Score.Home, f.Score.Away)
+		}
+		seen++
+	}
+	if seen == 0 {
+		t.Fatal("expected feed-confirmed FULLTIME frames for bp-501")
 	}
 }

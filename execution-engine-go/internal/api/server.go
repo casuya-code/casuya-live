@@ -225,18 +225,25 @@ func (h *Handler) analyticsPnL(w http.ResponseWriter, r *http.Request) {
 	netVal, _ := strconv.ParseFloat(vals["net"], 64)
 	wonVal, _ := strconv.Atoi(vals["won"])
 	lostVal, _ := strconv.Atoi(vals["lost"])
-	total := wonVal + lostVal
+	voidVal, _ := strconv.Atoi(vals["voids"])
+	total := wonVal + lostVal + voidVal
 	winRate := 0.0
+	if wonVal+lostVal > 0 {
+		winRate = math.Round(float64(wonVal)*10000/float64(wonVal+lostVal)) / 100
+	}
+	voidRate := 0.0
 	if total > 0 {
-		winRate = math.Round(float64(wonVal)*10000/float64(total)) / 100
+		voidRate = math.Round(float64(voidVal)*10000/float64(total)) / 100
 	}
 	writeJSON(w, map[string]any{
 		"type":          "pnl",
 		"net":           netVal,
 		"won":           wonVal,
 		"lost":          lostVal,
+		"voids":         voidVal,
 		"total_bets":    total,
 		"win_rate":      winRate,
+		"void_rate":     voidRate,
 		"source":        vals["source"],
 		"updated_cycle": vals["updated_cycle"],
 		"updated_at":    time.Now().UnixMilli(),
@@ -271,7 +278,7 @@ func (h *Handler) analyticsLedger(w http.ResponseWriter, r *http.Request) {
 		e := make(map[string]any, len(m.Values)+1)
 		for k, v := range m.Values {
 			switch k {
-			case "odds", "pnl", "stake", "score_home", "score_away", "settled_at":
+			case "odds", "pnl", "stake", "score_home", "score_away", "settled_at", "verified":
 				e[k] = numericValue(v)
 			default:
 				e[k] = v

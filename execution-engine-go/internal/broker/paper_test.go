@@ -55,11 +55,11 @@ func TestPaperSessionTracking(t *testing.T) {
 		{SettlementOrder: SettlementOrder{OrderID: "paper_1", Odds: 5.0, Stake: 25}, Result: "won", Pnl: 100},
 		{SettlementOrder: SettlementOrder{OrderID: "paper_2", Odds: 3.0, Stake: 25}, Result: "lost", Pnl: -25},
 	}
-	net, won, lost := settlementTotals(settled)
+	net, won, lost, void := settlementTotals(settled)
 	if net != 75 {
 		t.Fatalf("net = %v, want 75", net)
 	}
-	if won != 1 || lost != 1 {
-		t.Fatalf("won=%d lost=%d, want won=1 lost=1", won, lost)
+	if won != 1 || lost != 1 || void != 0 {
+		t.Fatalf("won=%d lost=%d void=%d, want won=1 lost=1 void=0", won, lost, void)
 	}
 }

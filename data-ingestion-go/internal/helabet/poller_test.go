@@ -279,7 +279,9 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 		}
 	}
 
-	// Empty feed server: the tracked match drops off -> must settle.
+	// Empty feed server: the tracked match drops off. The poller must NOT emit
+	// a fabricated FULLTIME settlement from a frozen live frame — that is the
+	// executor's job, and only against a confirmed result.
 	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("[]"))
@@ -306,17 +308,15 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 
 	p.tick(context.Background())
 
-	found := false
 	for _, f := range frames {
 		if f.Clock == "FULLTIME" && f.MatchID == "hb-123" {
-			found = true
-			if f.Score.Home != 1 || f.Score.Away != 0 {
-				t.Errorf("settlement score = %d-%d", f.Score.Home, f.Score.Away)
-			}
+			t.Errorf("dropped match must not emit fabricated FULLTIME, got frame %+v", f)
 		}
 	}
-	if !found {
-		t.Errorf("expected FULLTIME settlement frame, got %d frames", len(frames))
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, still := p.active["hb-123"]; still {
+		t.Error("dropped match should have been purged from tracking")
 	}
 }
 

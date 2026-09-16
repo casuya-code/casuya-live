@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ type PaperSession struct {
 	Net  float64 `json:"net"`
 	Won  int     `json:"won"`
 	Lost int     `json:"lost"`
+	Void int     `json:"void"`
 }
 
 // PaperBroker simulates order execution with zero financial risk.
@@ -168,7 +170,7 @@ func (p *PaperBroker) PaperRunLoop(ctx context.Context) {
 			if len(orders) == 0 {
 				continue
 			}
-			settled := settleOrders(orders, float64(frame.Score.Home), float64(frame.Score.Away))
+			settled := settleOrders(orders, float64(frame.Score.Home), float64(frame.Score.Away), "feed_ft", true)
 			p.mu.Lock()
 			p.cycle++
 			batch := p.cycle
@@ -178,9 +180,119 @@ func (p *PaperBroker) PaperRunLoop(ctx context.Context) {
 			p.publishPaperSnapshot(ctx, frame.MatchID, frame.Score.Home, frame.Score.Away, settled, batch)
 			// Clear only the graded orders
 			p.rdb.HDel(ctx, "execution:paper_orders", ids...)
-			net, _, _ := settlementTotals(settled)
+			net, _, _, _ := settlementTotals(settled)
 			log.Printf("[paper] settled %d order(s) for %s %d-%d: net %+.2f",
 				len(settled), frame.MatchID, frame.Score.Home, frame.Score.Away, net)
+		}
+	}
+}
+
+// StaleSweep is a safety net that settles paper orders whose match hash
+// hasn't been updated in over 100 minutes. This catches cases where the
+// ingestor never emitted a FULLTIME frame (feed never marked FT, match
+// dropped early, etc.) and the order would otherwise sit pending forever.
+//
+// IMPORTANT: a paper order is ONLY graded against a CONFIRMED final score.
+// The references from the match hash reflect the LAST LIVE SNAPSHOT the feed
+// published — which is never a verified full-time result. Matches whose feeds
+// never confirmed FULLTIME are recorded as "unresolved" (stake returned,
+// pnl 0) so an operator can review them; they are never fabricated into wins
+// or losses.
+func (p *PaperBroker) StaleSweep(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.sweepStale(ctx)
+		}
+	}
+}
+
+func (p *PaperBroker) sweepStale(ctx context.Context) {
+	entries, err := p.rdb.HGetAll(ctx, "execution:paper_orders").Result()
+	if err != nil || len(entries) == 0 {
+		return
+	}
+
+	stale := make(map[string]bool)
+	for id, raw := range entries {
+		var f Fill
+		if err := json.Unmarshal([]byte(raw), &f); err != nil || f.MatchID == "" {
+			continue
+		}
+		meta, err := p.rdb.HGetAll(ctx, "match:"+f.MatchID).Result()
+		if err != nil {
+			continue
+		}
+		if meta["kickoff"] != "" {
+			// Matches that have been running > 100 minutes from kickoff are
+			// long over regardless of what the feed is currently saying. This
+			// covers feeds that keep a finished match listed at a frozen clock.
+			kickoff, _ := strconv.ParseInt(meta["kickoff"], 10, 64)
+			if kickoff > 0 && time.Since(time.Unix(kickoff, 0)) > 100*time.Minute {
+				stale[id] = true
+				continue
+			}
+		}
+		if meta["received_at"] == "" {
+			continue
+		}
+		received, _ := strconv.ParseInt(meta["received_at"], 10, 64)
+		if received > 0 && time.Since(time.UnixMilli(received)) > 100*time.Minute {
+			stale[id] = true
+		}
+	}
+
+	if len(stale) == 0 {
+		return
+	}
+
+	for id := range stale {
+		raw := entries[id]
+		var f Fill
+		if err := json.Unmarshal([]byte(raw), &f); err != nil || f.MatchID == "" {
+			continue
+		}
+		meta, err := p.rdb.HGetAll(ctx, "match:"+f.MatchID).Result()
+		if err != nil {
+			continue
+		}
+
+		// The match hash's score is the last LIVE snapshot, not a confirmed
+		// final. Only grade when a real FULLTIME frame was recorded; otherwise
+		// the order is unresolved (stake returned, zero PnL) for review.
+		clock := meta["clock"]
+		home, _ := strconv.ParseFloat(meta["score_home"], 64)
+		away, _ := strconv.ParseFloat(meta["score_away"], 64)
+		verified := clock == "FULLTIME"
+
+		settled := settleOrders([]SettlementOrder{{
+			OrderID: f.OrderID,
+			Market:  f.Market,
+			Side:    f.Side,
+			Odds:    f.Odds,
+			Stake:   f.Stake,
+		}}, home, away, "stale_sweep", verified)
+
+		p.mu.Lock()
+		p.cycle++
+		batch := p.cycle
+		p.mu.Unlock()
+		p.persistSession(ctx, settled, batch)
+		p.recordSettlements(ctx, f.MatchID, home, away, settled)
+		p.publishPaperSnapshot(ctx, f.MatchID, int(home), int(away), settled, batch)
+		p.rdb.HDel(ctx, "execution:paper_orders", id)
+
+		net, _, _, _ := settlementTotals(settled)
+		if verified {
+			log.Printf("[paper] stale-sweep graded %s %d-%d (from recorded FULLTIME): net %+.2f",
+				f.MatchID, int(home), int(away), net)
+		} else {
+			log.Printf("[paper] stale-sweep marked %s unresolved (no confirmed FULLTIME frame): stake returned",
+				f.MatchID)
 		}
 	}
 }
@@ -190,17 +302,19 @@ func (p *PaperBroker) persistSession(ctx context.Context, settled []SettledOrder
 	if len(settled) == 0 {
 		return
 	}
-	net, won, lost := settlementTotals(settled)
+	net, won, lost, void := settlementTotals(settled)
 	p.mu.Lock()
 	p.session.Net += net
 	p.session.Won += won
 	p.session.Lost += lost
+	p.session.Void += void
 	p.mu.Unlock()
 
 	pipe := p.rdb.TxPipeline()
 	pipe.HIncrByFloat(ctx, p.pnlHash, "net", net)
 	pipe.HIncrBy(ctx, p.pnlHash, "won", int64(won))
 	pipe.HIncrBy(ctx, p.pnlHash, "lost", int64(lost))
+	pipe.HIncrBy(ctx, p.pnlHash, "voids", int64(void))
 	pipe.HSet(ctx, p.pnlHash, "source", "paper")
 	pipe.HSet(ctx, p.pnlHash, "updated_cycle", cycle)
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -224,6 +338,10 @@ func (p *PaperBroker) recordSettlements(ctx context.Context, matchID string, hom
 	pipe := p.rdb.Pipeline()
 	now := time.Now().UnixMilli()
 	for _, so := range settled {
+		verified := 0
+		if so.Verified {
+			verified = 1
+		}
 		pipe.XAdd(ctx, &redis.XAddArgs{
 			Stream: paperSettlementsStream,
 			MaxLen: 1000,
@@ -237,6 +355,8 @@ func (p *PaperBroker) recordSettlements(ctx context.Context, matchID string, hom
 				"stake":      so.Stake,
 				"result":     so.Result,
 				"pnl":        so.Pnl,
+				"source":     so.Source,
+				"verified":   verified,
 				"score_home": home,
 				"score_away": away,
 				"settled_at": now,
@@ -269,6 +389,7 @@ func (p *PaperBroker) publishPaperSnapshot(ctx context.Context, matchID string, 
 			Net:  p.session.Net,
 			Won:  p.session.Won,
 			Lost: p.session.Lost,
+			Void: p.session.Void,
 		},
 	}
 	p.mu.Unlock()

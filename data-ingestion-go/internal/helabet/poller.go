@@ -68,6 +68,7 @@ type Poller struct {
 	publish PublishFunc
 	mu      sync.Mutex
 	active  map[string]*trackedMatch
+	settled map[string]bool
 }
 
 type trackedMatch struct {
@@ -79,9 +80,10 @@ type trackedMatch struct {
 func New(cfg Config) *Poller {
 	cfg = cfg.withDefaults()
 	return &Poller{
-		cfg:    cfg,
-		client: cfg.HTTPClient,
-		active: make(map[string]*trackedMatch),
+		cfg:     cfg,
+		client:  cfg.HTTPClient,
+		active:  make(map[string]*trackedMatch),
+		settled: make(map[string]bool),
 	}
 }
 
@@ -126,6 +128,13 @@ func (p *Poller) tick(ctx context.Context) {
 		matchID := matchIDKey(raw.ID)
 		seen[matchID] = true
 
+		p.mu.Lock()
+		alreadySettled := p.settled[matchID]
+		p.mu.Unlock()
+		if alreadySettled {
+			continue
+		}
+
 		frame, ok := p.toMatch(raw)
 		if !ok {
 			continue // no valid FULLTIME_1X2 market — not bettable for our scope
@@ -143,9 +152,7 @@ func (p *Poller) tick(ctx context.Context) {
 			if err := p.safePublish(ctx, ft); err != nil {
 				log.Printf("[helabet] FULLTIME publish %s failed: %v", matchID, err)
 			}
-			p.mu.Lock()
-			delete(p.active, matchID)
-			p.mu.Unlock()
+			p.markSettled(matchID)
 			continue
 		}
 
@@ -154,31 +161,34 @@ func (p *Poller) tick(ctx context.Context) {
 		}
 	}
 
-	// Settle tracked matches that dropped off the live feed after full time.
+	// Drop tracked matches that vanished from the live feed. Their orders are
+	// left for the executor's stale sweep, which resolves them only against a
+	// confirmed FULLTIME frame (or marks them unresolved). We never fabricate a
+	// full-time score from a frozen live frame here.
 	p.mu.Lock()
-	var toSettle []stream.Match
-	for id, tm := range p.active {
+	var dropped []string
+	for id := range p.active {
 		if seen[id] {
 			continue
 		}
-		if ftEligibleForSettlement(tm.raw) {
-			ft := tm.lastFrame
-			ft.Clock = "FULLTIME"
-			ft.ReceivedAt = time.Now().UTC()
-			toSettle = append(toSettle, ft)
-		}
+		dropped = append(dropped, id)
+	}
+	for _, id := range dropped {
 		delete(p.active, id)
 	}
 	p.mu.Unlock()
 
-	for _, ft := range toSettle {
-		if err := p.safePublish(ctx, ft); err != nil {
-			log.Printf("[helabet] settlement publish %s failed: %v", ft.MatchID, err)
-		} else {
-			log.Printf("[helabet] settled %s FT %d-%d (dropped from live feed)",
-				ft.MatchID, ft.Score.Home, ft.Score.Away)
-		}
+	for _, id := range dropped {
+		p.markSettled(id)
+		log.Printf("[helabet] dropped %s from live feed (result pending executor confirmation)", id)
 	}
+}
+
+func (p *Poller) markSettled(matchID string) {
+	p.mu.Lock()
+	p.settled[matchID] = true
+	delete(p.active, matchID)
+	p.mu.Unlock()
 }
 
 func (p *Poller) safePublish(ctx context.Context, m stream.Match) error {

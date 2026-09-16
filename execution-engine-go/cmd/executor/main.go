@@ -48,6 +48,7 @@ func main() {
 		placer = paper
 		go paper.PaperRunLoop(ctx)
 		go paper.CommandRunLoop(ctx)
+		go paper.StaleSweep(ctx)
 		log.Println("paper trading mode — no real orders")
 
 	default:

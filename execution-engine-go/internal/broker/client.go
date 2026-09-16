@@ -178,13 +178,14 @@ func (b *Broker) settleLoop(ctx context.Context) {
 
 // grade applies settlement to the broker's session totals.
 func (b *Broker) grade(s *Settlement) *PnlSnapshot {
-	settled := settleOrders(s.Orders, s.FinalScore.Home, s.FinalScore.Away)
-	net, won, lost := settlementTotals(settled)
+	settled := settleOrders(s.Orders, s.FinalScore.Home, s.FinalScore.Away, s.Source, s.Verified)
+	net, won, lost, void := settlementTotals(settled)
 
 	b.mu.Lock()
 	b.session.Net += net
 	b.session.Won += won
 	b.session.Lost += lost
+	b.session.Void += void
 	snap := &PnlSnapshot{
 		Type:       "pnl",
 		Cycle:      s.Cycle,
@@ -221,11 +222,12 @@ func (b *Broker) persistSession(ctx context.Context, s *PnlSnapshot) {
 	if len(s.Settled) == 0 {
 		return
 	}
-	net, won, lost := settlementTotals(s.Settled)
+	net, won, lost, void := settlementTotals(s.Settled)
 	pipe := b.rdb.TxPipeline()
 	pipe.HIncrByFloat(ctx, b.cfg.PnlHash, "net", net)
 	pipe.HIncrBy(ctx, b.cfg.PnlHash, "won", int64(won))
 	pipe.HIncrBy(ctx, b.cfg.PnlHash, "lost", int64(lost))
+	pipe.HIncrBy(ctx, b.cfg.PnlHash, "voids", int64(void))
 	pipe.HSet(ctx, b.cfg.PnlHash, "updated_cycle", s.Cycle)
 	if _, err := pipe.Exec(ctx); err != nil {
 		log.Printf("pnl hash update failed: %v", err)

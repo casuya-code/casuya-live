@@ -34,6 +34,8 @@ type Settlement struct {
 	MatchID    string            `json:"match_id"`
 	FinalScore Score             `json:"final_score"`
 	Orders     []SettlementOrder `json:"orders"`
+	Source     string            `json:"source"`
+	Verified   bool              `json:"verified"`
 }
 
 // Score is the full-time result used to grade the fills.
@@ -45,8 +47,10 @@ type Score struct {
 // SettledOrder carries the computed result and PnL for one fill.
 type SettledOrder struct {
 	SettlementOrder
-	Result string  `json:"result"`
-	Pnl    float64 `json:"pnl"`
+	Result   string  `json:"result"`
+	Pnl      float64 `json:"pnl"`
+	Source   string  `json:"source"`
+	Verified bool    `json:"verified"`
 }
 
 // SessionTotals is the running bankroll view across all settled matches.
@@ -54,6 +58,7 @@ type SessionTotals struct {
 	Net  float64 `json:"net"`
 	Won  int     `json:"won"`
 	Lost int     `json:"lost"`
+	Void int     `json:"void"`
 }
 
 // PnlSnapshot is the operator-facing payload published on the PnL channel.
@@ -109,14 +114,21 @@ func pnlFor(result string, stake, odds float64) float64 {
 }
 
 // settleOrders grades the settlement's fills and returns the settled view.
-func settleOrders(orders []SettlementOrder, home, away float64) []SettledOrder {
+// source verifies the origin of the final-score basis (feed FT frame vs stale
+// sweep); verified=false marks orders that can only be reported unresolved.
+func settleOrders(orders []SettlementOrder, home, away float64, source string, verified bool) []SettledOrder {
 	settled := make([]SettledOrder, 0, len(orders))
 	for _, o := range orders {
 		result := outcomeFor(o.Side, home, away)
+		if !verified {
+			result = "unresolved"
+		}
 		settled = append(settled, SettledOrder{
 			SettlementOrder: o,
 			Result:          result,
 			Pnl:             pnlFor(result, o.Stake, o.Odds),
+			Source:          source,
+			Verified:        verified,
 		})
 	}
 	return settled
@@ -124,7 +136,7 @@ func settleOrders(orders []SettlementOrder, home, away float64) []SettledOrder {
 
 // settlementTotals derives the per-settlement contribution from graded fills.
 // The executor must persist these deltas, never the cumulative session.
-func settlementTotals(settled []SettledOrder) (net float64, won, lost int) {
+func settlementTotals(settled []SettledOrder) (net float64, won, lost, void int) {
 	for _, so := range settled {
 		net += so.Pnl
 		switch so.Result {
@@ -132,7 +144,9 @@ func settlementTotals(settled []SettledOrder) (net float64, won, lost int) {
 			won++
 		case "lost":
 			lost++
+		case "void":
+			void++
 		}
 	}
-	return net, won, lost
+	return net, won, lost, void
 }

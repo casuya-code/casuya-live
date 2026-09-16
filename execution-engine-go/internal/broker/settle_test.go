@@ -44,7 +44,7 @@ func TestSettleOrders(t *testing.T) {
 		{OrderID: "M3", Market: "2H_1X2", Side: "draw", Odds: 4.2, Stake: 25},
 		{OrderID: "M4", Market: "CS_2H", Side: "cs_2:3", Odds: 12, Stake: 25},
 	}
-	settled := settleOrders(orders, 1, 2)
+	settled := settleOrders(orders, 1, 2, "feed_ft", true)
 	want := map[string]float64{"M1": 180, "M2": -25, "M3": -25, "M4": 0}
 	if len(settled) != len(orders) {
 		t.Fatalf("expected %d settled, got %d", len(orders), len(settled))
@@ -64,7 +64,7 @@ func TestSettlementTotals(t *testing.T) {
 		{SettlementOrder: SettlementOrder{OrderID: "M4"}, Result: "lost", Pnl: -25},
 		{SettlementOrder: SettlementOrder{OrderID: "M5"}, Result: "void", Pnl: 0},
 	}
-	net, won, lost := settlementTotals(settled)
+	net, won, lost, void := settlementTotals(settled)
 	if net != 195 {
 		t.Fatalf("net = %v, want 195", net)
 	}
@@ -74,7 +74,10 @@ func TestSettlementTotals(t *testing.T) {
 	if lost != 2 {
 		t.Fatalf("lost = %d, want 2", lost)
 	}
-	if _, _, lost2 := settlementTotals(nil); lost2 != 0 {
+	if void != 1 {
+		t.Fatalf("void = %d, want 1", void)
+	}
+	if _, _, lost2, _ := settlementTotals(nil); lost2 != 0 {
 		t.Fatalf("empty settlement should stay flat, got lost=%d", lost2)
 	}
 }

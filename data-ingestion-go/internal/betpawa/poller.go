@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -128,13 +127,14 @@ func (p *Poller) tick(ctx context.Context) error {
 		}
 	}
 
-	for id, trk := range p.active {
+	for id := range p.active {
 		if !nowSeen[id] {
-			if !trk.ftEmitted && trk.match.Clock != "FULLTIME" && parseElapsedSeconds(trk.match.Clock) >= 5390 {
-				ft := trk.match
-				ft.Clock = "FULLTIME"
-				p.publish(ctx, ft)
-			}
+			// The match vanished from the feed. Its final result can only be
+			// confirmed by a FULLTIME frame the feed itself surfaced (handled
+			// above); otherwise the executor's stale sweep resolves the order
+			// against a confirmed FULLTIME frame or marks it unresolved. The
+			// safety net below is never used to fabricate a score from a
+			// frozen live frame.
 			delete(p.active, id)
 		}
 	}
@@ -204,12 +204,4 @@ func (p *Poller) toMatch(ev rawEvent) (stream.Match, bool) {
 		},
 		ReceivedAt: time.Now().UTC(),
 	}, true
-}
-
-func parseElapsedSeconds(clock string) int {
-	s := strings.TrimRight(strings.TrimSpace(clock), "'")
-	if n, err := strconv.Atoi(s); err == nil {
-		return n * 60
-	}
-	return 0
 }
