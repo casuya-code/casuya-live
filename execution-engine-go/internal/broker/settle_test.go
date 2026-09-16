@@ -10,10 +10,10 @@ func TestOutcomeFor(t *testing.T) {
 	}{
 		{"home", 2, 1, "won"},
 		{"home", 1, 2, "lost"},
-		{"home", 1, 1, "void"},
+		{"home", 1, 1, "lost"},
 		{"away", 1, 2, "won"},
 		{"away", 2, 1, "lost"},
-		{"away", 1, 1, "void"},
+		{"away", 1, 1, "lost"},
 		{"draw", 1, 1, "won"},
 		{"draw", 1, 2, "lost"},
 		{"cs_2:3", 1, 2, "void"},

@@ -71,25 +71,20 @@ type PnlSnapshot struct {
 	Session    SessionTotals  `json:"session"`
 }
 
-// outcomeFor resolves a 1X2 side against the final score.
+// outcomeFor resolves a 1X2 side against the final score. Home and away bets
+// lose on a draw — like a real bookmaker — only draw-side bets win a draw.
 func outcomeFor(side string, home, away float64) string {
 	switch side {
 	case "home":
 		if home > away {
 			return "won"
 		}
-		if home < away {
-			return "lost"
-		}
-		return "void"
+		return "lost"
 	case "away":
 		if away > home {
 			return "won"
 		}
-		if away < home {
-			return "lost"
-		}
-		return "void"
+		return "lost"
 	case "draw":
 		if home == away {
 			return "won"
