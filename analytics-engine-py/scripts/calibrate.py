@@ -617,7 +617,7 @@ def _publish_model_hash(status: str, redis_url: str, fields: dict[str, Any] | No
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fit the Study Room win-probability model.")
     parser.add_argument("--redis-url", default=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
-    parser.add_argument("--frames", type=int, default=2000, help="max frames to read from history")
+    parser.add_argument("--frames", type=int, default=int(os.getenv("CALIBRATE_FRAMES", "2000")), help="max frames to read from history")
     parser.add_argument("--update-distributions", action="store_true", help="recompute baselines")
     parser.add_argument("--l2", type=float, default=0.001, help="L2 ridge penalty (default 0.001; sklearn.linear_model handles feature std internally so larger lambdas do NOT tame raw-scale feature magnitudes - use MODEL_TEMPERATURE / MAX_TRUE_PROB in filter_engine.py for that)")
     args = parser.parse_args()

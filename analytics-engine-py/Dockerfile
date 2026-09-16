@@ -5,6 +5,6 @@ WORKDIR /srv/analytics
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-RUN useradd -m -u 1000 casuya
+RUN useradd -m -u 1000 casuya && chown -R casuya:casuya /srv/analytics
 USER casuya
 CMD ["python", "-u", "src/main.py"]
