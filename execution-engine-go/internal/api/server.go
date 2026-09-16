@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -49,6 +50,7 @@ func New(broker OrderPlacer, addr string, token string, rdb *redis.Client) *Hand
 	mux.HandleFunc("/api/v1/analytics/pnl", h.analyticsPnL)
 	mux.HandleFunc("/api/v1/analytics/ledger", h.analyticsLedger)
 	mux.HandleFunc("/api/v1/admin/analytics/reset", h.adminResetAnalytics)
+	mux.HandleFunc("/api/v1/admin/analytics/prune-unresolved", h.adminPruneUnresolved)
 	mux.HandleFunc("/api/v1/operator/place", h.operatorPlace)
 	mux.HandleFunc("/api/v1/operator/placements", h.operatorPlacements)
 	h.server = &http.Server{
@@ -338,6 +340,96 @@ func (h *Handler) adminResetAnalytics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"status": "reset", "keep_ledger": body.KeepLedger})
+}
+
+// adminPruneUnresolved removes stale "unresolved" entries from the settlement
+// ledger and recomputes the PnL hash so the dashboard matches the remaining
+// valid entries. This is a safe cleanup after the frozen-clock fix — all prior
+// unresolved entries carry pnl=0 and were counted as voids in the hash.
+func (h *Handler) adminPruneUnresolved(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if secret := r.Header.Get("X-Internal-Token"); secret == "" || h.accessToken != secret {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.rdb == nil {
+		http.Error(w, "redis unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := r.Context()
+	stream := broker.PaperSettlementsStream()
+
+	// 1. Read all stream entries
+	msgs, err := h.rdb.XRangeN(ctx, stream, "-", "+", 5000).Result()
+	if err != nil {
+		http.Error(w, "redis read failed", http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Collect IDs where result == "unresolved"
+	var toDelete []string
+	for _, m := range msgs {
+		if m.Values["result"] == "unresolved" {
+			toDelete = append(toDelete, m.ID)
+		}
+	}
+
+	// 3. XDEL the stale entries
+	if len(toDelete) > 0 {
+		if err := h.rdb.XDel(ctx, stream, toDelete...).Err(); err != nil {
+			http.Error(w, "stream delete failed", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// 4. Recompute PnL hash from remaining valid entries
+	remaining, err := h.rdb.XRangeN(ctx, stream, "-", "+", 5000).Result()
+	if err != nil {
+		http.Error(w, "redis re-read failed", http.StatusInternalServerError)
+		return
+	}
+	var net float64
+	var won, lost, void int
+	for _, m := range remaining {
+		pnl, _ := strconv.ParseFloat(fmt.Sprintf("%v", m.Values["pnl"]), 64)
+		result, _ := m.Values["result"].(string)
+		net += pnl
+		switch result {
+		case "won":
+			won++
+		case "lost":
+			lost++
+		default:
+			void++
+		}
+	}
+
+	pipe := h.rdb.TxPipeline()
+	pipe.Del(ctx, broker.PnlHashName())
+	pipe.HSet(ctx, broker.PnlHashName(), map[string]any{
+		"net":    math.Round(net*100) / 100,
+		"won":    won,
+		"lost":   lost,
+		"voids":  void,
+		"source": "prune-unresolved",
+	})
+	if _, err := pipe.Exec(ctx); err != nil {
+		http.Error(w, "hash recompute failed", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"status":        "pruned",
+		"deleted":       len(toDelete),
+		"remaining":     len(remaining),
+		"net":           net,
+		"won":           won,
+		"lost":          lost,
+		"voids":         void,
+	})
 }
 
 // operatorPlace records a manual bookmaker placement the operator made against
