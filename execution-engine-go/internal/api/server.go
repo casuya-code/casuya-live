@@ -48,6 +48,7 @@ func New(broker OrderPlacer, addr string, token string, rdb *redis.Client) *Hand
 	mux.HandleFunc("/api/v1/signals/active", h.activeSignals)
 	mux.HandleFunc("/api/v1/analytics/pnl", h.analyticsPnL)
 	mux.HandleFunc("/api/v1/analytics/ledger", h.analyticsLedger)
+	mux.HandleFunc("/api/v1/admin/analytics/reset", h.adminResetAnalytics)
 	mux.HandleFunc("/api/v1/operator/place", h.operatorPlace)
 	mux.HandleFunc("/api/v1/operator/placements", h.operatorPlacements)
 	h.server = &http.Server{
@@ -300,6 +301,43 @@ func numericValue(v any) any {
 		return n
 	}
 	return s
+}
+
+// adminResetAnalytics purges the accumulated paper PnL counters and the ledger
+// used by the operator desk. Guarded by the shared internal auth token.
+// Request body: {"keep_ledger": true} to leave the settlement stream intact.
+func (h *Handler) adminResetAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if secret := r.Header.Get("X-Internal-Token"); secret == "" || h.accessToken != secret {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.rdb == nil {
+		http.Error(w, "redis unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		KeepLedger bool `json:"keep_ledger"`
+	}
+	if r.Body != nil {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	ctx := r.Context()
+	if err := h.rdb.Del(ctx, broker.PnlHashName()).Err(); err != nil {
+		http.Error(w, "pnl reset failed", http.StatusInternalServerError)
+		return
+	}
+	if !body.KeepLedger {
+		if err := h.rdb.Del(ctx, broker.PaperSettlementsStream()).Err(); err != nil {
+			http.Error(w, "ledger reset failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"status": "reset", "keep_ledger": body.KeepLedger})
 }
 
 // operatorPlace records a manual bookmaker placement the operator made against

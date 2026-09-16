@@ -32,6 +32,15 @@ func PnlHashName() string {
 	return PnlHashDefault
 }
 
+// PaperSettlementsStream returns the configured ledger stream key
+// (PAPER_SETTLEMENTS_STREAM env).
+func PaperSettlementsStream() string {
+	if v := os.Getenv("PAPER_SETTLEMENTS_STREAM"); v != "" {
+		return v
+	}
+	return paperSettlementsStream
+}
+
 // BuildSignal renders the operator-facing signal view for a fill, enriching it
 // with match metadata (teams, league, clock) from the match hash when available.
 func BuildSignal(ctx context.Context, rdb *redis.Client, fill *Fill, rawOdds, trueProb, impliedProb float64) map[string]any {
