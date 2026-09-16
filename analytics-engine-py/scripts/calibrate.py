@@ -764,6 +764,7 @@ def main() -> None:
             dists = recompute_distributions(frames)
             DISTS_PATH.write_text(json.dumps(dists, indent=2, sort_keys=True), encoding="utf-8")
             print(f"wrote {DISTS_PATH} with leagues: {', '.join(dists['leagues']) if dists['leagues'] else '(none)'}")
+            print(f"DISTS_JSON={json.dumps(dists, sort_keys=True)}")
         except OSError as exc:
             print(f"distributions write skipped: {exc}")
 
