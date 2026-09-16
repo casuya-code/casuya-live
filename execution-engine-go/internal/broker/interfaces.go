@@ -231,11 +231,12 @@ func (p *PaperBroker) sweepStale(ctx context.Context) {
 			continue
 		}
 		if meta["kickoff"] != "" {
-			// Matches that have been running > 100 minutes from kickoff are
-			// long over regardless of what the feed is currently saying. This
-			// covers feeds that keep a finished match listed at a frozen clock.
+			// Matches that have been running > 180 minutes from kickoff
+			// are long over regardless of what the feed is currently
+			// saying. This gives the ingestor drop-loop time to emit a
+			// FULLTIME frame before the sweep voids the order.
 			kickoff, _ := strconv.ParseInt(meta["kickoff"], 10, 64)
-			if kickoff > 0 && time.Since(time.Unix(kickoff, 0)) > 100*time.Minute {
+			if kickoff > 0 && time.Since(time.Unix(kickoff, 0)) > 180*time.Minute {
 				stale[id] = true
 				continue
 			}
@@ -244,7 +245,7 @@ func (p *PaperBroker) sweepStale(ctx context.Context) {
 			continue
 		}
 		received, _ := strconv.ParseInt(meta["received_at"], 10, 64)
-		if received > 0 && time.Since(time.UnixMilli(received)) > 100*time.Minute {
+		if received > 0 && time.Since(time.UnixMilli(received)) > 180*time.Minute {
 			stale[id] = true
 		}
 	}
