@@ -698,31 +698,27 @@ def main() -> None:
         )
         _publish_model_hash("refused", args.redis_url)
     else:
-        WEIGHTS_PATH.write_text(
-            json.dumps(
-                {
-                    "version": 3,
-                    "generated_at": _now_iso(),
-                    "train_rows": len(Xtr),
-                    "val_rows": len(Xva),
-                    "features": FEATURE_COLS,
-                    "l2": args.l2,
-                    "bias": round(bias, 6),
-                    "weights": [round(w, 6) for w in weights],
-                    "train_accuracy": round(train_acc, 4),
-                    "train_brier": round(train_brier, 4),
-                    "val_accuracy": round(val_acc, 4),
-                    "val_brier": round(val_brier, 4),
-                    "val_auc": round(val_auc_val, 4),
-                    "baseline_logloss": round(base_ll, 4),
-                    "model_logloss": round(val_ll, 4),
-                },
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
+        payload = {
+            "version": 3,
+            "generated_at": _now_iso(),
+            "train_rows": len(Xtr),
+            "val_rows": len(Xva),
+            "features": FEATURE_COLS,
+            "l2": args.l2,
+            "bias": round(bias, 6),
+            "weights": [round(w, 6) for w in weights],
+            "train_accuracy": round(train_acc, 4),
+            "train_brier": round(train_brier, 4),
+            "val_accuracy": round(val_acc, 4),
+            "val_brier": round(val_brier, 4),
+            "val_auc": round(val_auc_val, 4),
+            "baseline_logloss": round(base_ll, 4),
+            "model_logloss": round(val_ll, 4),
+        }
+        WEIGHTS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         print(f"wrote {WEIGHTS_PATH}")
+        # Machine-readable line for one-shot containers / log capture.
+        print(f"CALIB_JSON={json.dumps(payload, sort_keys=True)}")
         _publish_model_hash(
             "adopted",
             args.redis_url,

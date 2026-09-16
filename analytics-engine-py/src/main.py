@@ -10,7 +10,9 @@ import dataclasses
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import redis.asyncio as redis
 
@@ -192,6 +194,15 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    if os.getenv("CALIBRATE_ON_BOOT", "").strip().lower() in ("1", "true", "yes", "on"):
+        # One-shot calibration against the live stream before starting the
+        # broker. Used by deployment bootstraps so the engine picks up fitted
+        # weights instead of the shim. Prints CALIB_JSON=… on stdout for
+        # capture/committing back into the repo.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        import calibrate  # type: ignore[import-not-found]
+
+        calibrate.main()
     asyncio.run(AnalyticsBroker().run())
 
 
