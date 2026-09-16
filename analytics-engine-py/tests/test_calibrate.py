@@ -97,14 +97,14 @@ draw_balanced = FilterEngine.true_probability(_BALANCED, "draw")
 assert 0.0 <= draw_balanced <= _fe.DRAW_PROB_CAP, f"draw cap violated: {draw_balanced}"
 
 eng = FilterEngine(base_url="http://unused", signer_key="k")
-# Draw at odds 6.0 < MIN_DRAW_ODDS(8.0) must be excluded from selection even
-# though it would pass the generic MIN_ODDS floor.
+# SELECT_DRAW=false (default) disables draw selection entirely regardless of
+# odds, so draw below MIN_DRAW_ODDS must NOT be selected...
 verdict_draw_floor = eng.best_side({"home": 2.0, "draw": 6.0, "away": 2.0}, _BALANCED)
 assert verdict_draw_floor[0] != "draw", "draw below MIN_DRAW_ODDS must not be selected"
-# Draw at odds 9.0 qualifies; since true draw prob <= DRAW_PROB_CAP it may still
-# lose the edge to home/away, but it must remain a legal candidate.
-verdict_draw_ok = eng.best_side({"home": 2.0, "draw": 9.0, "away": 2.0}, _BALANCED)
-assert verdict_draw_ok[0] in ("home", "away", "draw")
+# ...and draw above MIN_DRAW_ODDS must also be excluded when SELECT_DRAW=false.
+# Home/away at valid odds [5,8] must be chosen instead.
+verdict_draw_ok = eng.best_side({"home": 5.5, "draw": 9.0, "away": 6.5}, _BALANCED)
+assert verdict_draw_ok[0] in ("home", "away"), "SELECT_DRAW=false must never select draw"
 print("draw bias guards: OK")
 
 

@@ -27,8 +27,10 @@ import requests
 LOG = logging.getLogger("casuya.filter")
 
 MIN_ODDS = float(os.getenv("MIN_TRIGGER_ODDS", "5.0"))
+MAX_ODDS = float(os.getenv("MAX_TRIGGER_ODDS", "8.0"))
 MIN_DRAW_ODDS = float(os.getenv("MIN_DRAW_ODDS", "8.0"))
 DRAW_PROB_CAP = float(os.getenv("DRAW_PROB_CAP", "0.30"))
+SELECT_DRAW = os.getenv("SELECT_DRAW", "false").strip().lower() in ("1", "true", "yes", "on")
 MARGIN_SLACK = float(os.getenv("TRUE_PROB_MARGIN_SLACK", "0.020"))  # 2pp safety
 
 # Post-hoc model calibration (remedies runaway logits from unnormalised
@@ -108,16 +110,18 @@ class FilterEngine:
     def best_side(self, odds: dict[str, float], snapshot: Any) -> tuple[str, float, float]:
         """Return (side, true_prob, implied_prob) of the strongest edge.
 
-        The edge is measured per-leg; sides below the odds floor are
-        excluded. Draw bets require higher odds (MIN_DRAW_ODDS) due to
-        historically poor draw calibration. A negative best edge is still
-        returned — evaluate() applies the margin-slack gate and rejects it.
+        The edge is measured per-leg; sides below the odds floor or above the
+        odds cap are excluded. Draw bets are excluded unless SELECT_DRAW is
+        enabled (they are disabled by default: the draw residual is poorly
+        calibrated and 0/x in live paper history). A negative best edge is
+        still returned — evaluate() applies the margin-slack gate and rejects
+        it.
         """
         best: tuple[str, float, float] | None = None
-        for side in ("home", "away", "draw"):
+        sides = ("home", "away") if not SELECT_DRAW else ("home", "away", "draw")
+        for side in sides:
             price = float(odds.get(side, 0.0))
-            floor = MIN_DRAW_ODDS if side == "draw" else MIN_ODDS
-            if price < floor:
+            if price < MIN_ODDS or price > MAX_ODDS:
                 continue
             true_prob = FilterEngine.true_probability(snapshot, side)
             implied = FilterEngine.implied_probability(price)
@@ -140,7 +144,7 @@ class FilterEngine:
                 False, snapshot.match_id, snapshot.market_id, side, price,
                 implied, true_prob,
                 features=getattr(snapshot, "features", {}),
-                reasons=[f"no market leg >= {MIN_ODDS:.2f}"],
+                reasons=[f"no market leg in [{MIN_ODDS:.2f}, {MAX_ODDS:.2f}]"],
             )
         should = true_prob > implied + MARGIN_SLACK
         return Verdict(
