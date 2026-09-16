@@ -73,7 +73,9 @@ func NewPaperBroker(rdb *redis.Client, pnlHash string) *PaperBroker {
 	}
 }
 
-// PlaceOrder simulates a fill with slippage and logs to Redis.
+// PlaceOrder simulates a fill with slippage. The Redis write is deferred
+// to ExecuteEnvelope so the MatchID is set atomically (prevents StaleSweep
+// from seeing an order with an empty MatchID).
 func (p *PaperBroker) PlaceOrder(ctx context.Context, marketID string, side string, odds float64, stake float64) (*Fill, error) {
 	if stake <= 0 {
 		return nil, fmt.Errorf("stake must be positive")
@@ -91,20 +93,21 @@ func (p *PaperBroker) PlaceOrder(ctx context.Context, marketID string, side stri
 		FillAt:  time.Now(),
 	}
 
-	payload, err := json.Marshal(fill)
-	if err != nil {
-		return nil, fmt.Errorf("marshal paper fill: %w", err)
-	}
-	if p.rdb == nil {
-		return nil, fmt.Errorf("paper trade log: redis client unavailable")
-	}
-	if err := p.rdb.HSet(ctx, "execution:paper_orders", fill.OrderID, payload).Err(); err != nil {
-		return nil, fmt.Errorf("paper trade log: %w", err)
-	}
-
 	log.Printf("[paper] order %s: %s %s @%.2f (raw %.2f) stake %.2f",
 		fill.OrderID, marketID, side, fillPrice, odds, stake)
 	return fill, nil
+}
+
+// logFill persists a paper fill to Redis after the MatchID has been set.
+func (p *PaperBroker) logFill(ctx context.Context, fill *Fill) error {
+	if p.rdb == nil {
+		return fmt.Errorf("paper trade log: redis client unavailable")
+	}
+	payload, err := json.Marshal(fill)
+	if err != nil {
+		return fmt.Errorf("marshal paper fill: %w", err)
+	}
+	return p.rdb.HSet(ctx, "execution:paper_orders", fill.OrderID, payload).Err()
 }
 
 // PaperRunLoop subscribes to matches:live and grades paper orders on FULLTIME.
@@ -414,13 +417,9 @@ func (p *PaperBroker) ExecuteEnvelope(ctx context.Context, raw string) error {
 	if err != nil {
 		return err
 	}
-	if fill.MatchID == "" {
-		fill.MatchID = payload.MatchID
-		if body, err := json.Marshal(fill); err == nil {
-			if err := p.rdb.HSet(ctx, "execution:paper_orders", fill.OrderID, body).Err(); err != nil {
-				log.Printf("[paper] signal record update failed: %v", err)
-			}
-		}
+	fill.MatchID = payload.MatchID
+	if err := p.logFill(ctx, fill); err != nil {
+		log.Printf("[paper] signal record update failed: %v", err)
 	}
 	publishSignal(ctx, p.rdb, fill, payload.Odds, payload.TrueProb, payload.Implied)
 	return nil

@@ -208,6 +208,7 @@ async function handleStats(res) {
         net: pnl.net !== undefined ? Number(pnl.net) : 0,
         won: Number(pnl.won || 0),
         lost: Number(pnl.lost || 0),
+        voids: Number(pnl.voids || 0),
         updated_cycle: pnl.updated_cycle ? Number(pnl.updated_cycle) : null,
       },
       outcomes: {

@@ -168,6 +168,21 @@ func isFullTimePeriod(d rawDisplay) bool {
 	return strings.Contains(slug, "FULL_TIME") || strings.Contains(slug, "FINISHED") || strings.Contains(slug, "ENDED")
 }
 
+// clockIsLate reports whether a pipeline clock string indicates85+ minutes
+// (i.e. the match is close enough to full time that a dropped feed entry
+// should be treated as finished).
+func clockIsLate(clock string) bool {
+	clock = strings.TrimSpace(clock)
+	if clock == "FULLTIME" || clock == "HT" {
+		return clock == "FULLTIME"
+	}
+	minStr := strings.TrimSuffix(clock, "'")
+	if n, err := strconv.Atoi(minStr); err == nil && n >= 85 {
+		return true
+	}
+	return false
+}
+
 func kickoffTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t

@@ -131,8 +131,9 @@ func TestFetchLiveRejectsNon200(t *testing.T) {
 
 func TestRunSettlesDroppedMatch(t *testing.T) {
 	// Server returns one match; on second tick returns empty → match dropped.
-	// The poller must NOT fabricate a FULLTIME frame from a frozen live frame;
-	// only a feed-confirmed FINISHED/FULL_TIME period gets one.
+	// The poller emits ONE FULLTIME for a late dropped match (85+ minutes) so
+	// pending paper orders can be graded against the vendor's recorded score;
+	// a feed-confirmed FULL_TIME period gets one via the normal path.
 	call := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call++
@@ -160,9 +161,54 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
+	ftSeen := 0
 	for _, f := range frames {
 		if f.MatchID == "bp-500" && f.Clock == "FULLTIME" {
-			t.Fatalf("dropped match must not emit fabricated FULLTIME, got frame %+v", f)
+			ftSeen++
+			if f.Score.Home != 1 || f.Score.Away != 0 {
+				t.Fatalf("dropped FT score = %d-%d, want 1-0", f.Score.Home, f.Score.Away)
+			}
+		}
+	}
+	if ftSeen == 0 {
+		t.Fatal("dropped late match must emit exactly one FULLTIME for grading")
+	}
+}
+
+func TestRunDropsEarlyMatchNoFullTime(t *testing.T) {
+	// A match that drops while still in the FIRST half must NOT emit FULLTIME
+	// — its score cannot be treated as final.
+	body := `{"responses":[{"responses":[{"id":"502","name":"A-B","startTime":"2026-09-15T12:00:00Z","results":{"display":{"minute":"40","currentPeriod":{"slug":"FIRST_HALF"}},"participantPeriodResults":[{"participant":{"type":"HOME"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"","type":"SCORE"}]},{"participant":{"type":"AWAY"},"periodResults":[{"period":{"slug":"FULL_TIME_EXCLUDING_OVERTIME"},"result":"","type":"SCORE"}]}]},"participants":[{"name":"A","position":1},{"name":"B","position":2}],"markets":[{"marketType":{"id":"3743"},"row":[{"prices":[{"name":"1","odds":2.0},{"name":"X","odds":3.0},{"name":"2","odds":8.0}]}]}],"category":{"id":"2","name":"Football"},"region":{"id":"1","name":"K"},"competition":{"id":"1","name":"P"}}]}]}`
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		if call <= 1 {
+			w.Write([]byte(body))
+		} else {
+			w.Write([]byte(`{"responses":[{"responses":[]}]}`))
+		}
+	}))
+	defer srv.Close()
+
+	p := New(Config{BaseURL: srv.URL, Interval: 50 * time.Millisecond, Take: 5})
+	var mu sync.Mutex
+	var frames []stream.Match
+	publish := func(_ context.Context, m stream.Match) error {
+		mu.Lock()
+		defer mu.Unlock()
+		frames = append(frames, m)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+	_ = p.Run(ctx, publish)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, f := range frames {
+		if f.MatchID == "bp-502" && f.Clock == "FULLTIME" {
+			t.Fatalf("early dropped match must not emit FULLTIME, got %+v", f)
 		}
 	}
 }

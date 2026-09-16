@@ -110,10 +110,14 @@ func IsFullTime(raw *rawMatch) bool {
 }
 
 // ftEligibleForSettlement reports whether a match that is about to drop off
-// the live feed has plausibly completed its full-time score (>= 89:50).
+// the live feed has plausibly completed its full-time score (>= 89:50) with
+// the match clock stopped. A running timer means added/stoppage time is still
+// in play — the score is not final and must NOT be fabricated into FULLTIME.
 func ftEligibleForSettlement(raw *rawMatch) bool {
 	if raw.Scores == nil || raw.Scores.Timer == nil {
 		return false
 	}
-	return raw.Scores.CurrentPeriod >= 2 && raw.Scores.Timer.TimeSec >= 5390
+	return raw.Scores.CurrentPeriod >= 2 &&
+		!raw.Scores.Timer.TimeRun &&
+		raw.Scores.Timer.TimeSec >= 5390
 }

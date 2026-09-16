@@ -320,6 +320,67 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 	}
 }
 
+func TestDropAndSettleFinishedMatch(t *testing.T) {
+	// A match whose timer stopped at 90+ minutes (TimeRun=false) that drops off
+	// the live feed is finished — the poller emits FULLTIME so the executor can
+	// grade pending orders against the recorded score.
+	finished := rawMatch{
+		ID:        124,
+		Sport:     sportRef{ID: 1, Name: "Football"},
+		Liga:      champRef{ID: 1, Name: "League"},
+		Opponent1: teamRef{FullName: "A"},
+		Opponent2: teamRef{FullName: "B"},
+		StartTs:   1789470000,
+		Scores: &scores{
+			FullScore:     "2-1",
+			ScoreOpp1:     2,
+			ScoreOpp2:     1,
+			StatusLineStr: "90 minutes",
+			CurrentPeriod: 2,
+			Timer:         &matchTimer{TimeSec: 5405, TimeRun: false},
+		},
+		EventGroups: []eventGroup{{GroupID: 1, Events: [][]event{
+			{{Type: 1, Cf: 2.0}}, {{Type: 2, Cf: 3.5}}, {{Type: 3, Cf: 3.6}},
+		}}},
+	}
+
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer empty.Close()
+
+	p := New(Config{BaseURL: empty.URL})
+	frame, ok := p.toMatch(&finished)
+	if !ok {
+		t.Fatal("seed frame failed to map")
+	}
+	p.mu.Lock()
+	p.active["hb-124"] = &trackedMatch{raw: &finished, lastFrame: frame}
+	p.mu.Unlock()
+
+	var frames []stream.Match
+	p.publish = func(_ context.Context, m stream.Match) error {
+		frames = append(frames, m)
+		return nil
+	}
+
+	p.tick(context.Background())
+
+	ftSeen := 0
+	for _, f := range frames {
+		if f.MatchID == "hb-124" && f.Clock == "FULLTIME" {
+			ftSeen++
+			if f.Score.Home != 2 || f.Score.Away != 1 {
+				t.Errorf("dropped finished FT score = %d-%d, want 2-1", f.Score.Home, f.Score.Away)
+			}
+		}
+	}
+	if ftSeen == 0 {
+		t.Fatal("dropped finished match must emit FULLTIME for grading")
+	}
+}
+
 func TestStaleActivePurge(t *testing.T) {
 	p := New(Config{})
 	old := &trackedMatch{raw: &rawMatch{}, lastFrame: stream.Match{ReceivedAt: time.Now().UTC().Add(-8 * time.Hour)}}

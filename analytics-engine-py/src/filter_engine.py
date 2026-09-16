@@ -27,6 +27,8 @@ import requests
 LOG = logging.getLogger("casuya.filter")
 
 MIN_ODDS = float(os.getenv("MIN_TRIGGER_ODDS", "5.0"))
+MIN_DRAW_ODDS = float(os.getenv("MIN_DRAW_ODDS", "8.0"))
+DRAW_PROB_CAP = float(os.getenv("DRAW_PROB_CAP", "0.30"))
 MARGIN_SLACK = float(os.getenv("TRUE_PROB_MARGIN_SLACK", "0.020"))  # 2pp safety
 
 # Post-hoc model calibration (remedies runaway logits from unnormalised
@@ -107,13 +109,15 @@ class FilterEngine:
         """Return (side, true_prob, implied_prob) of the strongest edge.
 
         The edge is measured per-leg; sides below the odds floor are
-        excluded. A negative best edge is still returned — evaluate()
-        applies the margin-slack gate and rejects it there.
+        excluded. Draw bets require higher odds (MIN_DRAW_ODDS) due to
+        historically poor draw calibration. A negative best edge is still
+        returned — evaluate() applies the margin-slack gate and rejects it.
         """
         best: tuple[str, float, float] | None = None
         for side in ("home", "away", "draw"):
             price = float(odds.get(side, 0.0))
-            if price < MIN_ODDS:
+            floor = MIN_DRAW_ODDS if side == "draw" else MIN_ODDS
+            if price < floor:
                 continue
             true_prob = FilterEngine.true_probability(snapshot, side)
             implied = FilterEngine.implied_probability(price)
@@ -205,13 +209,15 @@ class FilterEngine:
 
         If calibrate.py has written weights.json, the weight vector + bias
         replace the offline shim (SHIM_WEIGHTS, no bias). Draw probability is
-        derived from the two opposing legs to keep the market closed.
+        derived from the two opposing legs to keep the market closed, then
+        capped at DRAW_PROB_CAP to avoid overconfidence on low-frequency
+        outcomes.
         """
         features = getattr(snapshot, "features", {}) or {}
         if side == "draw":
             away_p = cls.true_probability(snapshot, "away")
             home_p = cls.true_probability(snapshot, "home")
-            return max(0.0, 1.0 - away_p - home_p)
+            return min(max(0.0, 1.0 - away_p - home_p), DRAW_PROB_CAP)
 
         x = cls.score_inputs(snapshot, side)
         calib = cls._calibrated()

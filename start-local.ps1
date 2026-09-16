@@ -93,22 +93,25 @@ $svc += Start-Svc -Name "analytics" -File (Join-Path $root "analytics-engine-py\
     -ArgsList @("src\main.py") -WorkDir (Join-Path $root "analytics-engine-py") `
     -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "EXECUTION_SERVICE_URL" = "http://localhost:8081" }
 
-$svc += Start-Svc -Name "mock" -File "node" -ArgsList @((Join-Path $root "mock-vendor\server.js")) `
-    -WorkDir (Join-Path $root "mock-vendor") `
-    -Env @{ "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "MOCK_VENDOR_PORT" = "19999"; "MOCK_TRADE_PORT" = "19998"; "REDIS_URL" = "redis://localhost:6379/0" }
+# Real live-data ingestion: Helabet and BetPawa public live boards. Two
+# ingestor processes (one per provider) publish into the same matches:live
+# pipeline. mock-vendor is NOT part of the real-data chain — it exists only
+# for the test suite and offline demos.
+$ingestorHelabetEnv = @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_MODE" = "helabet" }
+if ($env:HELABET_BASE_URL) { $ingestorHelabetEnv["HELABET_BASE_URL"] = $env:HELABET_BASE_URL }
+if ($env:HELABET_POLL_SECONDS) { $ingestorHelabetEnv["HELABET_POLL_SECONDS"] = $env:HELABET_POLL_SECONDS }
+$svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") -Env $ingestorHelabetEnv
 
-$ingestorEnv = @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_WS_URL" = "ws://localhost:19999/vendor" }
-if ($env:PROVIDER_MODE) { $ingestorEnv["PROVIDER_MODE"] = $env:PROVIDER_MODE }
-if ($env:APIFOOTBALL_KEY) { $ingestorEnv["APIFOOTBALL_KEY"] = $env:APIFOOTBALL_KEY }
-if ($env:HELABET_BASE_URL) { $ingestorEnv["HELABET_BASE_URL"] = $env:HELABET_BASE_URL }
-if ($env:HELABET_POLL_SECONDS) { $ingestorEnv["HELABET_POLL_SECONDS"] = $env:HELABET_POLL_SECONDS }
-if ($env:BETPAWA_BASE_URL) { $ingestorEnv["BETPAWA_BASE_URL"] = $env:BETPAWA_BASE_URL }
-if ($env:BETPAWA_BRAND) { $ingestorEnv["BETPAWA_BRAND"] = $env:BETPAWA_BRAND }
-if ($env:BETPAWA_POLL_SECONDS) { $ingestorEnv["BETPAWA_POLL_SECONDS"] = $env:BETPAWA_POLL_SECONDS }
-$svc += Start-Svc -Name "ingestor" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") -Env $ingestorEnv
+$ingestorBetpawaEnv = @{ "REDIS_URL" = "redis://localhost:6379/0"; "PROVIDER_MODE" = "betpawa" }
+if ($env:BETPAWA_BASE_URL) { $ingestorBetpawaEnv["BETPAWA_BASE_URL"] = $env:BETPAWA_BASE_URL }
+if ($env:BETPAWA_BRAND) { $ingestorBetpawaEnv["BETPAWA_BRAND"] = $env:BETPAWA_BRAND }
+if ($env:BETPAWA_POLL_SECONDS) { $ingestorBetpawaEnv["BETPAWA_POLL_SECONDS"] = $env:BETPAWA_POLL_SECONDS }
+$svc += Start-Svc -Name "ingestor-betpawa" -File (Join-Path $bin "ingestor.exe") -WorkDir (Join-Path $root "data-ingestion-go") -Env $ingestorBetpawaEnv
 
+# Paper trading grades paper fills against the REAL full-time scores published
+# on matches:live by the feed pollers — no mock bookmaker involved.
 $svc += Start-Svc -Name "executor" -File (Join-Path $bin "executor.exe") -WorkDir (Join-Path $root "execution-engine-go") `
-    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "BOOKMAKER_WS_URL" = "ws://localhost:19998/trade"; "BOOKMAKER_API_KEY" = "local-test-key"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "PORT" = "8081" }
+    -Env @{ "REDIS_URL" = "redis://localhost:6379/0"; "PAPER_TRADE" = "true"; "INTERNAL_AUTH_SECRET" = "local-dev-secret"; "PORT" = "8081" }
 
 $svc += Start-Svc -Name "frontend" -File "npm.cmd" -ArgsList @("run","dev") `
     -WorkDir (Join-Path $root "web-interface-js\frontend") `

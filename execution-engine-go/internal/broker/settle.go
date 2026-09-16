@@ -136,6 +136,8 @@ func settleOrders(orders []SettlementOrder, home, away float64, source string, v
 
 // settlementTotals derives the per-settlement contribution from graded fills.
 // The executor must persist these deltas, never the cumulative session.
+// Unresolved orders are counted as voids (no PnL movement) so operator
+// dashboards can see how many settlements were not conclusively graded.
 func settlementTotals(settled []SettledOrder) (net float64, won, lost, void int) {
 	for _, so := range settled {
 		net += so.Pnl
@@ -144,7 +146,7 @@ func settlementTotals(settled []SettledOrder) (net float64, won, lost, void int)
 			won++
 		case "lost":
 			lost++
-		case "void":
+		case "void", "unresolved":
 			void++
 		}
 	}

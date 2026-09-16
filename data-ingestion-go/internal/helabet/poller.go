@@ -161,26 +161,37 @@ func (p *Poller) tick(ctx context.Context) {
 		}
 	}
 
-	// Drop tracked matches that vanished from the live feed. Their orders are
-	// left for the executor's stale sweep, which resolves them only against a
-	// confirmed FULLTIME frame (or marks them unresolved). We never fabricate a
-	// full-time score from a frozen live frame here.
+	// Drop tracked matches that vanished from the live feed. Matches whose
+	// timer stopped at 90+ minutes were finished — emit FULLTIME so pending
+	// paper orders can be graded against the recorded score. Otherwise the
+	// executor's stale sweep resolves them only against a confirmed FULLTIME
+	// frame (or marks them unresolved). We never fabricate a full-time score
+	// from a frozen, in-play live frame.
 	p.mu.Lock()
-	var dropped []string
-	for id := range p.active {
+	dropped := make(map[string]*trackedMatch)
+	for id, tm := range p.active {
 		if seen[id] {
 			continue
 		}
-		dropped = append(dropped, id)
-	}
-	for _, id := range dropped {
+		dropped[id] = tm
 		delete(p.active, id)
 	}
 	p.mu.Unlock()
 
-	for _, id := range dropped {
+	for id, tm := range dropped {
+		if tm != nil && ftEligibleForSettlement(tm.raw) {
+			ft := tm.lastFrame
+			ft.Clock = "FULLTIME"
+			ft.ReceivedAt = time.Now().UTC()
+			if err := p.safePublish(ctx, ft); err != nil {
+				log.Printf("[helabet] dropped-but-FT FULLTIME publish %s failed: %v", id, err)
+			} else {
+				log.Printf("[helabet] dropped %s from live feed — emitted FULLTIME %d-%d", id, ft.Score.Home, ft.Score.Away)
+			}
+		} else {
+			log.Printf("[helabet] dropped %s from live feed (result pending executor confirmation)", id)
+		}
 		p.markSettled(id)
-		log.Printf("[helabet] dropped %s from live feed (result pending executor confirmation)", id)
 	}
 }
 

@@ -127,14 +127,17 @@ func (p *Poller) tick(ctx context.Context) error {
 		}
 	}
 
-	for id := range p.active {
+	for id, trk := range p.active {
 		if !nowSeen[id] {
-			// The match vanished from the feed. Its final result can only be
-			// confirmed by a FULLTIME frame the feed itself surfaced (handled
-			// above); otherwise the executor's stale sweep resolves the order
-			// against a confirmed FULLTIME frame or marks it unresolved. The
-			// safety net below is never used to fabricate a score from a
-			// frozen live frame.
+			if !trk.ftEmitted && clockIsLate(trk.match.Clock) {
+				ft := trk.match
+				ft.Clock = "FULLTIME"
+				ft.ReceivedAt = time.Now().UTC()
+				p.publish(ctx, ft)
+				log.Printf("[betpawa] dropped %s — emitted FULLTIME %d-%d", id, ft.Score.Home, ft.Score.Away)
+			} else if !trk.ftEmitted {
+				log.Printf("[betpawa] dropped %s from live feed (clock %s, result pending executor confirmation)", id, trk.match.Clock)
+			}
 			delete(p.active, id)
 		}
 	}

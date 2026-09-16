@@ -69,9 +69,43 @@ def shim(side):
 
 assert FilterEngine.true_probability(SNAP, "home") == shim("home")
 assert FilterEngine.true_probability(SNAP, "away") == shim("away")
+draw_raw = max(0.0, 1 - shim("home") - shim("away"))
 draw_p = FilterEngine.true_probability(SNAP, "draw")
-assert draw_p == max(0.0, 1 - shim("home") - shim("away")), "draw derives from the closed market and clamps"
+# Draw probability is derived from the closed market AND capped by DRAW_PROB_CAP
+# to avoid overconfidence on low-frequency outcomes.
+assert draw_p == min(draw_raw, _fe.DRAW_PROB_CAP), "draw derives from the closed market and applies DRAW_PROB_CAP"
 print("true_probability shim fallback: OK")
+
+
+# --- draw bias guards ---
+# A near-balanced snapshot with no team behind can make BOTH home and away
+# probabilities small, leaving a large draw residual. DRAW_PROB_CAP must clamp
+# it, and best_side must respect MIN_DRAW_ODDS for the draw leg.
+from types import SimpleNamespace as _NS
+
+_BALANCED = _NS(
+    features={
+        "divergence": 0.0,
+        "danger_intensity": 1.0,
+        "possession_gap": 0.0,
+        "shot_accuracy_gap": 0.0,
+        "score_pressure": 0.0,
+        "home_behind": 0.0,
+    }
+)
+draw_balanced = FilterEngine.true_probability(_BALANCED, "draw")
+assert 0.0 <= draw_balanced <= _fe.DRAW_PROB_CAP, f"draw cap violated: {draw_balanced}"
+
+eng = FilterEngine(base_url="http://unused", signer_key="k")
+# Draw at odds 6.0 < MIN_DRAW_ODDS(8.0) must be excluded from selection even
+# though it would pass the generic MIN_ODDS floor.
+verdict_draw_floor = eng.best_side({"home": 2.0, "draw": 6.0, "away": 2.0}, _BALANCED)
+assert verdict_draw_floor[0] != "draw", "draw below MIN_DRAW_ODDS must not be selected"
+# Draw at odds 9.0 qualifies; since true draw prob <= DRAW_PROB_CAP it may still
+# lose the edge to home/away, but it must remain a legal candidate.
+verdict_draw_ok = eng.best_side({"home": 2.0, "draw": 9.0, "away": 2.0}, _BALANCED)
+assert verdict_draw_ok[0] in ("home", "away", "draw")
+print("draw bias guards: OK")
 
 
 # --- fit_logistic recovers a synthetic logistic relationship ---

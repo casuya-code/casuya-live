@@ -29,6 +29,7 @@ function maxDrawdown(entries) {
 function ResultBadge({ result }) {
   if (result === "won") return <span className="badge badge--ok">WON</span>;
   if (result === "lost") return <span className="badge badge--danger">LOST</span>;
+  if (result === "unresolved") return <span className="badge badge--warn">UNRESOLVED</span>;
   return <span className="badge badge--warn">VOID</span>;
 }
 
@@ -45,8 +46,9 @@ export default function PnLTracker({ pnl, ledger, loading }) {
   const net = Number(pnl?.net);
   const won = Number(pnl?.won) || 0;
   const lost = Number(pnl?.lost) || 0;
-  const total = won + lost;
-  const winRate = total > 0 ? Math.round((won / total) * 10000) / 100 : 0;
+  const voids = Number(pnl?.voids) || 0;
+  const total = won + lost + voids;
+  const winRate = won + lost > 0 ? Math.round((won / (won + lost)) * 10000) / 100 : 0;
   const dd = maxDrawdown(ledger || []);
   const entries = ledger || [];
 
@@ -77,13 +79,13 @@ export default function PnLTracker({ pnl, ledger, loading }) {
             {total}
           </div>
           <div style={{ fontSize: "11px", color: "var(--text-3)", marginTop: "2px" }}>
-            {won} won · {lost} lost
+            {won} won · {lost} lost · {voids} void
           </div>
         </div>
         <div className="card" style={{ padding: "14px 16px", borderRadius: "12px" }}>
           <span className="eyebrow">win rate</span>
           <div className="mono" style={{ fontSize: "30px", fontWeight: 800, lineHeight: 1.1, color: "var(--accent)" }}>
-            {total > 0 ? `${winRate.toFixed(1)}%` : "—"}
+            {won + lost > 0 ? `${winRate.toFixed(1)}%` : "—"}
           </div>
         </div>
         <div className="card" style={{ padding: "14px 16px", borderRadius: "12px" }}>
