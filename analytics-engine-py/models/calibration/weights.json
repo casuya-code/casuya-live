@@ -1,0 +1,29 @@
+{
+  "baseline_logloss": 0.592,
+  "bias": 0.374806,
+  "features": [
+    "divergence",
+    "danger_intensity",
+    "possession_gap",
+    "shot_accuracy_gap",
+    "behind_target"
+  ],
+  "generated_at": "2026-09-16T16:00:13+00:00",
+  "l2": 0.001,
+  "model_logloss": 0.5042,
+  "train_accuracy": 0.7745,
+  "train_brier": 0.1442,
+  "train_rows": 37846,
+  "val_accuracy": 0.6963,
+  "val_auc": 0.7284,
+  "val_brier": 0.1837,
+  "val_rows": 15672,
+  "version": 3,
+  "weights": [
+    0.012328,
+    -0.008049,
+    0.000203,
+    -2.067657,
+    -4.298312
+  ]
+}
