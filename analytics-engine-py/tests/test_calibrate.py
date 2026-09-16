@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from filter_engine import FEATURE_COLS, FilterEngine, SHIM_WEIGHTS
+from filter_engine import FEATURE_COLS, FilterEngine, SHIM_WEIGHTS, MODEL_TEMPERATURE, MAX_TRUE_PROB
 
 # --- score_inputs mirrors the shim's original home/away inversion math ---
 from types import SimpleNamespace
@@ -62,7 +62,9 @@ _force_shim()
 def shim(side):
     x = FilterEngine.score_inputs(SNAP, side)
     z = sum(w * xi for w, xi in zip(SHIM_WEIGHTS, x))
-    return 1.0 / (1.0 + math.exp(-z))
+    # Mirror true_probability's transforms: temperature scaling + cap.
+    p = 1.0 / (1.0 + math.exp(-z / MODEL_TEMPERATURE))
+    return min(p, MAX_TRUE_PROB)
 
 
 assert FilterEngine.true_probability(SNAP, "home") == shim("home")
