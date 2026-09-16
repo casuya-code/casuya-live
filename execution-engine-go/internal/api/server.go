@@ -51,6 +51,7 @@ func New(broker OrderPlacer, addr string, token string, rdb *redis.Client) *Hand
 	mux.HandleFunc("/api/v1/analytics/ledger", h.analyticsLedger)
 	mux.HandleFunc("/api/v1/admin/analytics/reset", h.adminResetAnalytics)
 	mux.HandleFunc("/api/v1/admin/analytics/prune-unresolved", h.adminPruneUnresolved)
+	mux.HandleFunc("/api/v1/admin/analytics/regrade-draws", h.adminRegradeDraws)
 	mux.HandleFunc("/api/v1/operator/place", h.operatorPlace)
 	mux.HandleFunc("/api/v1/operator/placements", h.operatorPlacements)
 	h.server = &http.Server{
@@ -429,6 +430,127 @@ func (h *Handler) adminPruneUnresolved(w http.ResponseWriter, r *http.Request) {
 		"won":           won,
 		"lost":          lost,
 		"voids":         void,
+	})
+}
+
+// adminRegradeDraws re-grades existing "void" settlements on home/away bets
+// that finished as a draw into losses, matching the real-bookmaker semantics
+// (a draw is a loss for non-draw sides, only draw-side bets void-refund).
+func (h *Handler) adminRegradeDraws(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if secret := r.Header.Get("X-Internal-Token"); secret == "" || h.accessToken != secret {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.rdb == nil {
+		http.Error(w, "redis unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := r.Context()
+	stream := broker.PaperSettlementsStream()
+
+	msgs, err := h.rdb.XRangeN(ctx, stream, "-", "+", 5000).Result()
+	if err != nil {
+		http.Error(w, "redis read failed", http.StatusInternalServerError)
+		return
+	}
+
+	// 1. Find void entries on home/away sides where the final score was a draw
+	var toDelete []string
+	var regraded []map[string]any
+	for _, m := range msgs {
+		if m.Values["result"] != "void" {
+			continue
+		}
+		side, _ := m.Values["side"].(string)
+		if side != "home" && side != "away" {
+			continue
+		}
+		home, hErr := strconv.ParseFloat(fmt.Sprintf("%v", m.Values["score_home"]), 64)
+		away, aErr := strconv.ParseFloat(fmt.Sprintf("%v", m.Values["score_away"]), 64)
+		if hErr != nil || aErr != nil || home != away {
+			continue
+		}
+		toDelete = append(toDelete, m.ID)
+		regraded = append(regraded, m.Values)
+	}
+
+	// 2. Delete the void entries and re-add them as losses
+	if len(toDelete) > 0 {
+		if err := h.rdb.XDel(ctx, stream, toDelete...).Err(); err != nil {
+			http.Error(w, "stream delete failed", http.StatusInternalServerError)
+			return
+		}
+		pipe := h.rdb.Pipeline()
+		for _, v := range regraded {
+			stake, _ := strconv.ParseFloat(fmt.Sprintf("%v", v["stake"]), 64)
+			cp := make(map[string]any, len(v))
+			for k, val := range v {
+				cp[k] = val
+			}
+			cp["result"] = "lost"
+			cp["pnl"] = -stake
+			cp["source"] = "regrade-draws"
+			pipe.XAdd(ctx, &redis.XAddArgs{
+				Stream: stream,
+				MaxLen: 1000,
+				Approx: true,
+				Values: cp,
+			})
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			http.Error(w, "stream regrade failed", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// 3. Recompute the PnL hash from the surviving entries
+	remaining, err := h.rdb.XRangeN(ctx, stream, "-", "+", 5000).Result()
+	if err != nil {
+		http.Error(w, "redis re-read failed", http.StatusInternalServerError)
+		return
+	}
+	var net float64
+	var won, lost, void int
+	for _, m := range remaining {
+		pnl, _ := strconv.ParseFloat(fmt.Sprintf("%v", m.Values["pnl"]), 64)
+		result, _ := m.Values["result"].(string)
+		net += pnl
+		switch result {
+		case "won":
+			won++
+		case "lost":
+			lost++
+		default:
+			void++
+		}
+	}
+
+	pipe := h.rdb.TxPipeline()
+	pipe.Del(ctx, broker.PnlHashName())
+	pipe.HSet(ctx, broker.PnlHashName(), map[string]any{
+		"net":    math.Round(net*100) / 100,
+		"won":    won,
+		"lost":   lost,
+		"voids":  void,
+		"source": "regrade-draws",
+	})
+	if _, err := pipe.Exec(ctx); err != nil {
+		http.Error(w, "hash recompute failed", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"status":    "regraded",
+		"regraded":  len(regraded),
+		"remaining": len(remaining),
+		"net":       net,
+		"won":       won,
+		"lost":      lost,
+		"voids":     void,
 	})
 }
 
