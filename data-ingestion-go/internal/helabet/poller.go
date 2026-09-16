@@ -179,7 +179,7 @@ func (p *Poller) tick(ctx context.Context) {
 	p.mu.Unlock()
 
 	for id, tm := range dropped {
-		if tm != nil && ftEligibleForSettlement(tm.raw) {
+		if tm != nil && (IsFullTime(tm.raw) || clockLateForDrop(tm.raw)) {
 			ft := tm.lastFrame
 			ft.Clock = "FULLTIME"
 			ft.ReceivedAt = time.Now().UTC()
@@ -200,6 +200,19 @@ func (p *Poller) markSettled(matchID string) {
 	p.settled[matchID] = true
 	delete(p.active, matchID)
 	p.mu.Unlock()
+}
+
+// clockLateForDrop reports whether a dropped match has been running long
+// enough (85+ minutes on the match clock) that its last-known score can
+// be treated as final for settlement purposes. Unlike
+// ftEligibleForSettlement, this does not require the timer to be
+// stopped — a match that drops from the feed while the added-time
+// timer is still running is nevertheless finished enough to grade.
+func clockLateForDrop(raw *rawMatch) bool {
+	if raw == nil || raw.Scores == nil || raw.Scores.Timer == nil {
+		return false
+	}
+	return raw.Scores.Timer.TimeSec >= 5390
 }
 
 func (p *Poller) safePublish(ctx context.Context, m stream.Match) error {

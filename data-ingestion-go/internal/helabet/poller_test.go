@@ -279,9 +279,10 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 		}
 	}
 
-	// Empty feed server: the tracked match drops off. The poller must NOT emit
-	// a fabricated FULLTIME settlement from a frozen live frame — that is the
-	// executor's job, and only against a confirmed result.
+	// Empty feed server: the tracked match drops off. A match whose
+	// clock is 90'+ that drops from the live feed is finished enough
+	// to grade — the poller emits FULLTIME so the executor can settle
+	// pending orders against the recorded score.
 	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("[]"))
@@ -290,7 +291,7 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 
 	p := New(Config{BaseURL: empty.URL})
 
-	// Seed the internal tracker directly (as if a live frame was seen at 90'+).
+	// Seed the internal tracker directly (as if a live frame was seen at 90'+ with timer running).
 	seed := fixture(5410)
 	frame, ok := p.toMatch(&seed)
 	if !ok {
@@ -308,10 +309,17 @@ func TestRunSettlesDroppedMatch(t *testing.T) {
 
 	p.tick(context.Background())
 
+	found := false
 	for _, f := range frames {
 		if f.Clock == "FULLTIME" && f.MatchID == "hb-123" {
-			t.Errorf("dropped match must not emit fabricated FULLTIME, got frame %+v", f)
+			found = true
+			if f.Score.Home != 1 || f.Score.Away != 0 {
+				t.Errorf("FULLTIME score = %d-%d, want 1-0", f.Score.Home, f.Score.Away)
+			}
 		}
+	}
+	if !found {
+		t.Error("dropped 90'+ match should emit FULLTIME for grading")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
